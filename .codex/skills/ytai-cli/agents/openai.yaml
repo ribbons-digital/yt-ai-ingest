@@ -1,0 +1,4 @@
+interface:
+  display_name: "YTAI CLI"
+  short_description: "Maintain the local YouTube AI ingestion CLI"
+  default_prompt: "Use $ytai-cli to inspect or extend the local ytai YouTube ingestion CLI."
