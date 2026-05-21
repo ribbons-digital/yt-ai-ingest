@@ -12,6 +12,7 @@ import {
   rangeAround,
   type TimeRange
 } from "../lib/timestamps.js";
+import { success } from "../lib/ui.js";
 
 type FramesOptions = RunOptions & {
   around?: string;
@@ -64,7 +65,9 @@ export async function frames(videoFolder: string, options: FramesOptions): Promi
     });
   }
 
-  console.log(`Frames ${options.dryRun ? "planned" : "written"}: ${outDir}`);
+  if (!options.quiet) {
+    success(`Frames ${options.dryRun ? "planned" : "written"}`, outDir);
+  }
 }
 
 function resolveRanges(options: FramesOptions): TimeRange[] {

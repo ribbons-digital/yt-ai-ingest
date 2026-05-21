@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 export type RunOptions = {
   dryRun?: boolean;
   verbose?: boolean;
+  quiet?: boolean;
   cwd?: string;
   capture?: boolean;
   allowFailure?: boolean;
@@ -33,16 +34,17 @@ export async function runCommand(
   }
 
   return await new Promise((resolve, reject) => {
+    const stdio = resolveRunStdio(options);
     const child = spawn(command, args, {
       cwd: options.cwd,
       shell: false,
-      stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit"
+      stdio: stdio === "pipe" ? ["ignore", "pipe", "pipe"] : "inherit"
     });
 
     let stdout = "";
     let stderr = "";
 
-    if (options.capture) {
+    if (stdio === "pipe") {
       child.stdout?.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });
@@ -65,6 +67,13 @@ export async function runCommand(
       resolve(result);
     });
   });
+}
+
+export function resolveRunStdio(options: Pick<RunOptions, "capture" | "verbose">): "pipe" | "inherit" {
+  if (options.capture) {
+    return "pipe";
+  }
+  return options.verbose ? "inherit" : "pipe";
 }
 
 function quoteArg(value: string): string {

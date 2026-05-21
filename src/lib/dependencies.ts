@@ -20,10 +20,18 @@ export async function ensureDependencies(commands: string[], verbose = false): P
 }
 
 async function commandExists(command: string): Promise<boolean> {
-  const result = await runCommand(command, ["--version"], {
+  const result = await runCommand(command, getDependencyVersionArgs(command), {
     capture: true,
     allowFailure: true
   }).catch(() => ({ code: 1, stdout: "", stderr: "" }));
 
   return result.code === 0;
+}
+
+export function getDependencyVersionArgs(command: string): string[] {
+  if (command === "ffmpeg" || command === "ffprobe") {
+    return ["-version"];
+  }
+
+  return ["--version"];
 }

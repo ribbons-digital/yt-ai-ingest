@@ -1,9 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { listFilesRecursive, pathExists } from "../lib/files.js";
+import { info, success } from "../lib/ui.js";
 
 type ContextOptions = {
   verbose?: boolean;
+  quiet?: boolean;
 };
 
 export async function summarize(videoFolder: string, options: ContextOptions = {}): Promise<void> {
@@ -11,8 +13,10 @@ export async function summarize(videoFolder: string, options: ContextOptions = {
   const outPath = path.join(videoFolder, "analysis", "summary-input.md");
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, context, "utf8");
-  console.log(`Summary context written: ${outPath}`);
-  console.log("No AI provider is wired yet. Send this file to an AI model when ready.");
+  if (!options.quiet) {
+    success("Summary context written", outPath);
+    info("No AI provider is wired yet. Send this file to an AI model when ready.");
+  }
 }
 
 export async function ask(
@@ -24,8 +28,10 @@ export async function ask(
   const outPath = path.join(videoFolder, "analysis", "question-input.md");
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, context, "utf8");
-  console.log(`Question context written: ${outPath}`);
-  console.log("No AI provider is wired yet. Send this file to an AI model when ready.");
+  if (!options.quiet) {
+    success("Question context written", outPath);
+    info("No AI provider is wired yet. Send this file to an AI model when ready.");
+  }
 }
 
 async function buildContext(
@@ -42,15 +48,21 @@ async function buildContext(
   const transcript =
     (await readOptional(path.join(videoFolder, "transcript.srt"))) ??
     (await readOptional(path.join(videoFolder, "transcript.vtt")));
+  const visualContext = await readOptional(path.join(videoFolder, "analysis", "visual-context.md"));
   const manifests = (await listFilesRecursive(videoFolder)).filter((file) =>
     file.endsWith("frames_manifest.json")
+  );
+  const scoutManifests = (await listFilesRecursive(videoFolder)).filter((file) =>
+    file.endsWith("scout-manifest.json")
   );
 
   if (options.verbose) {
     console.error(`Loaded metadata: ${Boolean(metadata)}`);
     console.error(`Loaded description: ${Boolean(description)}`);
     console.error(`Loaded transcript: ${Boolean(transcript)}`);
+    console.error(`Loaded visual context: ${Boolean(visualContext)}`);
     console.error(`Found frame manifests: ${manifests.length}`);
+    console.error(`Found scout manifests: ${scoutManifests.length}`);
   }
 
   return [
@@ -59,8 +71,8 @@ async function buildContext(
     question ? `## Question\n\n${question}\n` : "## Task\n\nSummarize this video using timestamps where possible.\n",
     "## Instructions",
     "",
-    "- Use the transcript and metadata as primary evidence.",
-    "- Cite timestamps when they appear in the transcript or frame manifests.",
+    "- Use the transcript, metadata, and visual context as primary evidence.",
+    "- Cite timestamps when they appear in the transcript, frame manifests, or scout manifests.",
     "- If evidence is missing, say what local asset should be generated next.",
     "",
     "## Metadata",
@@ -75,11 +87,21 @@ async function buildContext(
     "",
     transcript ? fenced("", excerpt(transcript, 16000)) : "_No transcript.srt or transcript.vtt found._",
     "",
+    "## Visual Context",
+    "",
+    visualContext ? visualContext.trim() : "_No analysis/visual-context.md found._",
+    "",
     "## Frame Manifests",
     "",
     manifests.length > 0
       ? manifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
       : "_No frames_manifest.json files found._",
+    "",
+    "## Scout Manifests",
+    "",
+    scoutManifests.length > 0
+      ? scoutManifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
+      : "_No scout-manifest.json files found._",
     ""
   ].join("\n");
 }

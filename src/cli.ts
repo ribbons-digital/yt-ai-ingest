@@ -4,6 +4,8 @@ import { ask, summarize } from "./commands/context.js";
 import { clip } from "./commands/clip.js";
 import { frames } from "./commands/frames.js";
 import { ingest } from "./commands/ingest.js";
+import { prepare } from "./commands/prepare.js";
+import { scout } from "./commands/scout.js";
 import type { RequestedFrameMode } from "./lib/frameMode.js";
 
 const program = new Command();
@@ -23,6 +25,26 @@ program
   .action(async (url: string, options: { outDir: string }) => {
     await runCli(() => ingest(url, { ...globalOptions(), ...options }));
   });
+
+program
+  .command("prepare")
+  .description("Ingest, scout, and create a summary context in one local workflow")
+  .argument("<url>", "YouTube URL")
+  .option("--out-dir <dir>", "base output directory", "videos")
+  .option("--scout-interval <seconds>", "seconds between sampled scout frames", parsePositiveInteger, 60)
+  .option("--scout-columns <number>", "contact sheet columns", parsePositiveInteger, 4)
+  .action(
+    async (
+      url: string,
+      options: {
+        outDir: string;
+        scoutInterval: number;
+        scoutColumns: number;
+      }
+    ) => {
+      await runCli(() => prepare(url, { ...globalOptions(), ...options }));
+    }
+  );
 
 program
   .command("clip")
@@ -78,6 +100,26 @@ program
   );
 
 program
+  .command("scout")
+  .description("Automatically sample visual context from an ingested video folder")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .option("--interval <seconds>", "seconds between sampled frames", parsePositiveInteger, 60)
+  .option("--out <dir>", "output directory for scout frames")
+  .option("--columns <number>", "contact sheet columns", parsePositiveInteger, 4)
+  .action(
+    async (
+      videoFolder: string,
+      options: {
+        interval: number;
+        out?: string;
+        columns: number;
+      }
+    ) => {
+      await runCli(() => scout(videoFolder, { ...globalOptions(), ...options }));
+    }
+  );
+
+program
   .command("summarize")
   .description("Create a local AI summary prompt from an ingested video folder")
   .argument("<video-folder>", "folder created by ytai ingest")
@@ -104,7 +146,7 @@ function globalOptions(): { dryRun?: boolean; verbose?: boolean } {
   };
 }
 
-async function runCli(fn: () => Promise<void>): Promise<void> {
+async function runCli(fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn();
   } catch (error) {
@@ -122,6 +164,14 @@ function parsePositiveNumber(value: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new InvalidArgumentError("must be a number greater than 0");
+  }
+  return parsed;
+}
+
+function parsePositiveInteger(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError("must be an integer greater than 0");
   }
   return parsed;
 }

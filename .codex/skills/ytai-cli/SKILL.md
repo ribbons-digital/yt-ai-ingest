@@ -19,10 +19,12 @@ Use this skill when changing the `ytai` TypeScript CLI in this repository.
 ## Architecture
 
 - `src/cli.ts`: `commander` routing and user-facing flags.
-- `src/commands/`: command implementations for `ingest`, `clip`, `frames`, `summarize`, and `ask`.
+- `src/commands/`: command implementations for `prepare`, `ingest`, `clip`, `frames`, `scout`, `summarize`, and `ask`.
 - `src/lib/timestamps.ts`: timestamp and range parsing.
 - `src/lib/frameMode.ts`: `select`, `seek`, and `auto` frame-mode choice.
+- `src/lib/scoutPlan.ts`: automatic visual-scout timeline planning.
 - `src/lib/process.ts`: safe `spawn` wrapper and dry-run command rendering.
+- `src/lib/ui.ts`: shared CLI output helpers for colors, symbols, and spinners.
 - `src/lib/files.ts` and `src/lib/media.ts`: filesystem and media helpers.
 
 Read `references/cli-behavior.md` when changing command behavior or output structure.
