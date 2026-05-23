@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { frames } from "../src/commands/frames.js";
 import { chooseFrameExtractionMode } from "../src/lib/frameMode.js";
 
 describe("chooseFrameExtractionMode", () => {
@@ -46,5 +50,45 @@ describe("chooseFrameExtractionMode", () => {
         ranges: [{ start: 100, end: 120, input: "01:40-02:00" }]
       })
     ).toBe("select");
+  });
+});
+
+describe("frames", () => {
+  it("plans select-mode extraction in dry-run mode", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-frames-"));
+    await writeFile(path.join(videoFolder, "source.mp4"), "", "utf8");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await frames(videoFolder, {
+        dryRun: true,
+        quiet: true,
+        around: "00:10",
+        window: 5,
+        fps: 1,
+        ranges: [],
+        mode: "select"
+      });
+      expect(log.mock.calls.some(([line]) => String(line).includes("ffmpeg"))).toBe(true);
+      expect(log.mock.calls.some(([line]) => String(line).includes("select="))).toBe(true);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("requires at least one timestamp or range", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-frames-"));
+    await writeFile(path.join(videoFolder, "source.mp4"), "", "utf8");
+
+    await expect(
+      frames(videoFolder, {
+        dryRun: true,
+        quiet: true,
+        window: 5,
+        fps: 1,
+        ranges: [],
+        mode: "seek"
+      })
+    ).rejects.toThrow("Provide --around TIMESTAMP or at least one --range START-END.");
   });
 });

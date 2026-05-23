@@ -56,7 +56,7 @@ type YtDlpMetadata = {
   webpage_url?: string;
 };
 
-export type YtDlpErrorCategory =
+type YtDlpErrorCategory =
   | "rate_limit"
   | "video_unavailable"
   | "age_restricted"
@@ -183,120 +183,214 @@ export function buildYtDlpArgs(url: string, videoFolder: string, options: Ingest
 }
 
 export async function ingest(url: string, options: IngestOptions): Promise<IngestResult> {
-  if (!options.dryRun) {
-    await ensureDependencies(["yt-dlp"], options.verbose);
-    if (!options.transcriptOnly) {
-      await ensureDependencies(["ffmpeg"], options.verbose);
-    }
+  await ensureIngestDependencies(options);
+
+  const videoFolder = await prepareVideoFolder(url, options);
+  const downloadResult = await runYtDlpDownload(url, videoFolder, options, {
+    start: options.transcriptOnly
+      ? "Downloading transcript and metadata..."
+      : "Downloading video assets...",
+    success: options.transcriptOnly
+      ? "Downloaded transcript and metadata"
+      : "Downloaded video assets",
+    failure: "Download failed"
+  });
+
+  const warnings: string[] = [];
+  await handleDownloadFailure(downloadResult, videoFolder, options, warnings);
+
+  if (options.dryRun) {
+    return dryRunIngestResult(videoFolder, options, warnings);
   }
 
-  const metadataSpinner = startSpinner("Reading video metadata...", {
-    enabled: shouldShowProgress(options)
-  });
-  let metadata: YtDlpMetadata;
-  try {
-    metadata = await readVideoMetadata(url, options);
-    metadataSpinner.succeed("Read video metadata");
-  } catch (error) {
-    metadataSpinner.fail("Could not read video metadata");
-    throw error;
+  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing local assets...");
+  await writeIngestStatus(videoFolder, url, assets, warnings);
+  assertUsableAssets(assets);
+  printIngestSummary(videoFolder, assets, options);
+
+  return { videoFolder, assets, warnings };
+}
+
+async function ensureIngestDependencies(options: IngestOptions): Promise<void> {
+  if (options.dryRun) {
+    return;
   }
-  const folderName = [
-    new Date().toISOString().slice(0, 10),
-    safeSlug(metadata.title ?? "youtube-video"),
-    safeSlug(metadata.id ?? "unknown")
-  ].join("_");
-  const defaultVideoFolder = path.join(options.outDir, folderName);
+  await ensureDependencies(["yt-dlp"], options.verbose);
+  if (!options.transcriptOnly) {
+    await ensureDependencies(["ffmpeg"], options.verbose);
+  }
+}
+
+async function prepareVideoFolder(url: string, options: IngestOptions): Promise<string> {
+  const metadata = await readVideoMetadataWithSpinner(url, options);
+  const defaultVideoFolder = path.join(options.outDir, folderNameForMetadata(metadata));
   const videoFolder = await resolveVideoFolder(defaultVideoFolder, options);
 
   await ensureDir(path.join(videoFolder, "frames"));
   await ensureDir(path.join(videoFolder, "clips"));
   await ensureDir(path.join(videoFolder, "analysis"));
 
-  const downloadLabel = options.transcriptOnly ? "Downloading transcript and metadata..." : "Downloading video assets...";
-  const spinner = startSpinner(downloadLabel, {
+  return videoFolder;
+}
+
+async function readVideoMetadataWithSpinner(
+  url: string,
+  options: IngestOptions
+): Promise<YtDlpMetadata> {
+  const spinner = startSpinner("Reading video metadata...", {
     enabled: shouldShowProgress(options)
   });
-  let downloadResult: RunResult;
   try {
-    downloadResult = await runCommand(
-      "yt-dlp",
-      buildYtDlpArgs(url, videoFolder, options),
-      { ...options, allowFailure: true }
-    );
-    spinner.succeed(options.transcriptOnly ? "Downloaded transcript and metadata" : "Downloaded video assets");
+    const metadata = await readVideoMetadata(url, options);
+    spinner.succeed("Read video metadata");
+    return metadata;
   } catch (error) {
-    spinner.fail(options.transcriptOnly ? "Download failed" : "Download failed");
+    spinner.fail("Could not read video metadata");
     throw error;
   }
+}
 
-  const warnings: string[] = [];
-  if (downloadResult.code !== 0) {
-    const hasInfoJson = await pathExists(path.join(videoFolder, "source.info.json"));
-    const hasVtt =
-      (await findFirstFile(videoFolder, (name) => /^source\..*\.vtt$/i.test(name))) !== undefined;
-    const hasSourceVideo =
-      (await findFirstFile(videoFolder, (name) => /^source\.(mp4|mkv|webm|mov)$/i.test(name))) !== undefined;
-    const hasSomeAssets = options.transcriptOnly
-      ? hasInfoJson || hasVtt
-      : hasInfoJson || hasSourceVideo || hasVtt;
+function folderNameForMetadata(metadata: YtDlpMetadata): string {
+  return [
+    new Date().toISOString().slice(0, 10),
+    safeSlug(metadata.title ?? "youtube-video"),
+    safeSlug(metadata.id ?? "unknown")
+  ].join("_");
+}
 
-    if (hasSomeAssets) {
-      const partialAssets = [hasInfoJson ? "metadata" : "", hasSourceVideo ? "video" : "", hasVtt ? "subtitles" : ""].filter(Boolean).join(", ");
-      warn("Partial download", partialAssets);
-      warnings.push(`yt-dlp exited with code ${downloadResult.code} but partial assets found (${partialAssets}) — continuing`);
-    } else {
-      spinner.fail("Download failed");
-      const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
-      const suggestion = options.transcriptOnly
-        ? ""
-        : ` Try --transcript-only to fetch only text assets. ${errorInfo.suggestion}`;
-      throw new Error(`${errorInfo.message}.${suggestion}`);
-    }
+type YtDlpDownloadLabels = {
+  start: string;
+  success: string;
+  failure: string;
+};
+
+async function runYtDlpDownload(
+  url: string,
+  videoFolder: string,
+  options: IngestOptions,
+  labels: YtDlpDownloadLabels
+): Promise<RunResult> {
+  const spinner = startSpinner(labels.start, {
+    enabled: shouldShowProgress(options)
+  });
+  try {
+    const result = await runCommand("yt-dlp", buildYtDlpArgs(url, videoFolder, options), {
+      ...options,
+      allowFailure: true
+    });
+    spinner.succeed(labels.success);
+    return result;
+  } catch (error) {
+    spinner.fail(labels.failure);
+    throw error;
+  }
+}
+
+async function handleDownloadFailure(
+  downloadResult: RunResult,
+  videoFolder: string,
+  options: IngestOptions,
+  warnings: string[]
+): Promise<void> {
+  if (downloadResult.code === 0) {
+    return;
   }
 
-  if (options.dryRun) {
-    if (!options.quiet) {
-      console.log(`Would normalize artifacts in ${videoFolder}`);
-    }
-    const assets: IngestedAssets = {
+  const partialAssets = await detectPartialYtDlpAssets(videoFolder, options);
+  if (partialAssets.hasSomeAssets) {
+    warn("Partial download", partialAssets.label);
+    warnings.push(
+      `yt-dlp exited with code ${downloadResult.code} but partial assets found (${partialAssets.label}) — continuing`
+    );
+    return;
+  }
+
+  const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
+  const suggestion = options.transcriptOnly
+    ? ""
+    : ` Try --transcript-only to fetch only text assets. ${errorInfo.suggestion}`;
+  throw new Error(`${errorInfo.message}.${suggestion}`);
+}
+
+async function detectPartialYtDlpAssets(
+  videoFolder: string,
+  options: IngestOptions
+): Promise<{ hasSomeAssets: boolean; label: string }> {
+  const hasInfoJson = await pathExists(path.join(videoFolder, "source.info.json"));
+  const hasVtt =
+    (await findFirstFile(videoFolder, (name) => /^source\..*\.vtt$/i.test(name))) !== undefined;
+  const hasSourceVideo =
+    (await findFirstFile(videoFolder, (name) => /^source\.(mp4|mkv|webm|mov)$/i.test(name))) !==
+    undefined;
+  const hasSomeAssets = options.transcriptOnly
+    ? hasInfoJson || hasVtt
+    : hasInfoJson || hasSourceVideo || hasVtt;
+  const label = [hasInfoJson ? "metadata" : "", hasSourceVideo ? "video" : "", hasVtt ? "subtitles" : ""]
+    .filter(Boolean)
+    .join(", ");
+
+  return { hasSomeAssets, label };
+}
+
+function dryRunIngestResult(
+  videoFolder: string,
+  options: IngestOptions,
+  warnings: string[]
+): IngestResult {
+  if (!options.quiet) {
+    console.log(`Would normalize artifacts in ${videoFolder}`);
+  }
+  return {
+    videoFolder,
+    assets: {
       metadata: true,
       description: true,
       transcript: true,
       video: !options.transcriptOnly,
       audio: !options.transcriptOnly,
       thumbnail: !options.transcriptOnly
-    };
-    return { videoFolder, assets, warnings };
-  }
+    },
+    warnings
+  };
+}
 
-  const normalizeSpinner = startSpinner("Normalizing local assets...", {
+async function normalizeWithSpinner(
+  videoFolder: string,
+  options: IngestOptions,
+  label: string
+): Promise<IngestedAssets> {
+  const spinner = startSpinner(label, {
     enabled: shouldShowProgress(options)
   });
   const assets = await normalizeArtifacts(videoFolder, options);
-  normalizeSpinner.succeed("Normalized local assets");
+  spinner.succeed(label === "Normalizing local assets..." ? "Normalized local assets" : "Normalization complete");
+  return assets;
+}
 
-  // Write ingest status
-  await writeIngestStatus(videoFolder, url, assets, warnings);
-
+function assertUsableAssets(assets: IngestedAssets): void {
   const canSummarize = assets.metadata || assets.description || assets.transcript;
-  const canScout = assets.video;
-  if (!canSummarize && !canScout) {
+  if (!canSummarize && !assets.video) {
     throw new Error("No usable assets were produced by yt-dlp (no video, transcript, or metadata).");
   }
+}
 
-  if (!options.quiet) {
-    success(options.transcriptOnly ? "Transcript and metadata" : "Ingested assets", videoFolder);
-    if (options.transcriptOnly) {
-      warn("Transcript-only mode — no video downloaded");
-    }
-    if (!canScout) {
-      warn("No video available — scout step will be skipped");
-    }
-    section("Agent Prompt");
-    block(ingestedFolderAgentPrompt(videoFolder));
+function printIngestSummary(
+  videoFolder: string,
+  assets: IngestedAssets,
+  options: IngestOptions
+): void {
+  if (options.quiet) {
+    return;
   }
-  return { videoFolder, assets, warnings };
+  success(options.transcriptOnly ? "Transcript and metadata" : "Ingested assets", videoFolder);
+  if (options.transcriptOnly) {
+    warn("Transcript-only mode — no video downloaded");
+  }
+  if (!assets.video) {
+    warn("No video available — scout step will be skipped");
+  }
+  section("Agent Prompt");
+  block(ingestedFolderAgentPrompt(videoFolder));
 }
 
 async function writeIngestStatus(
@@ -329,80 +423,92 @@ export async function readIngestStatus(videoFolder: string): Promise<IngestStatu
 }
 
 export async function resumeIngest(videoFolder: string, options: IngestOptions): Promise<IngestResult> {
+  const status = await requireIngestStatus(videoFolder);
+  const warnings: string[] = [...status.warnings];
+
+  printResumeSummary(videoFolder, status.assets, options);
+  await ensureResumeDependencies(options);
+
+  const downloadResult = await runYtDlpDownload(status.url, videoFolder, options, {
+    start: "Resuming download...",
+    success: "Resume download complete",
+    failure: "Resume download failed"
+  });
+  handleResumeDownloadWarning(downloadResult, warnings);
+
+  if (options.dryRun) {
+    return dryRunResumeResult(videoFolder, warnings);
+  }
+
+  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing resumed assets...");
+  await writeIngestStatus(videoFolder, status.url, assets, warnings);
+
+  return { videoFolder, assets, warnings };
+}
+
+async function requireIngestStatus(videoFolder: string): Promise<IngestStatus> {
   const status = await readIngestStatus(videoFolder);
   if (!status) {
     throw new Error(`No ingest-status.json found in ${videoFolder}. Cannot resume.`);
   }
+  return status;
+}
 
-  const url = status.url;
-  const previousAssets = status.assets;
-  const warnings: string[] = [...status.warnings];
-
-  if (!options.quiet) {
-    success("Resuming ingest", videoFolder);
-    const missing: string[] = [];
-    if (!previousAssets.metadata) missing.push("metadata");
-    if (!previousAssets.description) missing.push("description");
-    if (!previousAssets.transcript) missing.push("transcript");
-    if (!previousAssets.video) missing.push("video");
-    if (missing.length > 0) {
-      warn("Missing assets", missing.join(", "));
-    } else {
-      warn("All assets already present", "nothing to resume");
-    }
+function printResumeSummary(
+  videoFolder: string,
+  previousAssets: IngestedAssets,
+  options: IngestOptions
+): void {
+  if (options.quiet) {
+    return;
   }
 
+  success("Resuming ingest", videoFolder);
+  const missing = missingAssetNames(previousAssets);
+  if (missing.length > 0) {
+    warn("Missing assets", missing.join(", "));
+  } else {
+    warn("All assets already present", "nothing to resume");
+  }
+}
+
+function missingAssetNames(assets: IngestedAssets): string[] {
+  return [
+    assets.metadata ? "" : "metadata",
+    assets.description ? "" : "description",
+    assets.transcript ? "" : "transcript",
+    assets.video ? "" : "video"
+  ].filter(Boolean);
+}
+
+async function ensureResumeDependencies(options: IngestOptions): Promise<void> {
   if (!options.dryRun) {
     await ensureDependencies(["yt-dlp"], options.verbose);
   }
+}
 
-  const downloadLabel = "Resuming download...";
-  const spinner = startSpinner(downloadLabel, {
-    enabled: shouldShowProgress(options)
-  });
-  let downloadResult: RunResult;
-  try {
-    downloadResult = await runCommand(
-      "yt-dlp",
-      buildYtDlpArgs(url, videoFolder, options),
-      { ...options, allowFailure: true }
-    );
-    spinner.succeed("Resume download complete");
-  } catch (error) {
-    spinner.fail("Resume download failed");
-    throw error;
+function handleResumeDownloadWarning(downloadResult: RunResult, warnings: string[]): void {
+  if (downloadResult.code === 0) {
+    return;
   }
+  warnings.push(`yt-dlp exited with code ${downloadResult.code} during resume`);
+  const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
+  warn("Resume download warning", errorInfo.message);
+}
 
-  if (downloadResult.code !== 0) {
-    warnings.push(`yt-dlp exited with code ${downloadResult.code} during resume`);
-    const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
-    warn("Resume download warning", errorInfo.message);
-  }
-
-  if (options.dryRun) {
-    return {
-      videoFolder,
-      assets: {
-        metadata: true,
-        description: true,
-        transcript: true,
-        video: true,
-        audio: true,
-        thumbnail: true
-      },
-      warnings
-    };
-  }
-
-  const normalizeSpinner = startSpinner("Normalizing resumed assets...", {
-    enabled: shouldShowProgress(options)
-  });
-  const assets = await normalizeArtifacts(videoFolder, options);
-  normalizeSpinner.succeed("Normalization complete");
-
-  await writeIngestStatus(videoFolder, url, assets, warnings);
-
-  return { videoFolder, assets, warnings };
+function dryRunResumeResult(videoFolder: string, warnings: string[]): IngestResult {
+  return {
+    videoFolder,
+    assets: {
+      metadata: true,
+      description: true,
+      transcript: true,
+      video: true,
+      audio: true,
+      thumbnail: true
+    },
+    warnings
+  };
 }
 
 function shouldShowProgress(options: IngestOptions): boolean {

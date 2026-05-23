@@ -40,10 +40,6 @@ export function skip(label: string, reason?: string): void {
   console.log(formatLine(figures.arrowRight, ansis.dim(label), reason));
 }
 
-export function error(label: string, value?: string): void {
-  console.error(formatLine(figures.cross, ansis.red(label), value));
-}
-
 export function startSpinner(text: string, options: SpinnerOptions = {}): Spinner {
   const enabled = options.enabled ?? process.stderr.isTTY;
   if (!enabled) {

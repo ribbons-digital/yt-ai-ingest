@@ -4,7 +4,7 @@
  * the first N characters.
  */
 
-export type TranscriptChunk = {
+type TranscriptChunk = {
   index: number;
   startSec: number;
   endSec: number;

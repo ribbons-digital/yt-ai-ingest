@@ -15,7 +15,7 @@ export type RunResult = {
   code: number;
 };
 
-export function quoteCommand(command: string, args: string[]): string {
+function quoteCommand(command: string, args: string[]): string {
   return [command, ...args].map(quoteArg).join(" ");
 }
 

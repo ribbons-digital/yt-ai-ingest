@@ -51,48 +51,72 @@ async function buildContext(
     throw new Error(`Video folder does not exist: ${videoFolder}`);
   }
 
-  const metadata = await readOptional(path.join(videoFolder, "metadata.info.json"));
-  const description = await readOptional(path.join(videoFolder, "description.txt"));
-  const transcriptRaw =
+  const assets = await loadContextAssets(videoFolder);
+  logLoadedAssets(assets, options);
+  return renderContext(videoFolder, question, assets);
+}
+
+type ContextAssets = {
+  metadata?: string;
+  description?: string;
+  transcriptRaw?: string;
+  visualContext?: string;
+  manifests: string[];
+  scoutManifests: string[];
+};
+
+async function loadContextAssets(videoFolder: string): Promise<ContextAssets> {
+  const allFiles = await listFilesRecursive(videoFolder);
+  return {
+    metadata: await readOptional(path.join(videoFolder, "metadata.info.json")),
+    description: await readOptional(path.join(videoFolder, "description.txt")),
+    transcriptRaw: await readTranscript(videoFolder),
+    visualContext: await readOptional(path.join(videoFolder, "analysis", "visual-context.md")),
+    manifests: allFiles.filter((file) => file.endsWith("frames_manifest.json")),
+    scoutManifests: allFiles.filter((file) => file.endsWith("scout-manifest.json"))
+  };
+}
+
+async function readTranscript(videoFolder: string): Promise<string | undefined> {
+  return (
     (await readOptional(path.join(videoFolder, "transcript.srt"))) ??
-    (await readOptional(path.join(videoFolder, "transcript.vtt")));
-  const visualContext = await readOptional(path.join(videoFolder, "analysis", "visual-context.md"));
-  const manifests = (await listFilesRecursive(videoFolder)).filter((file) =>
-    file.endsWith("frames_manifest.json")
+    (await readOptional(path.join(videoFolder, "transcript.vtt")))
   );
-  const scoutManifests = (await listFilesRecursive(videoFolder)).filter((file) =>
-    file.endsWith("scout-manifest.json")
-  );
+}
 
-  if (options.verbose) {
-    console.error(`Loaded metadata: ${Boolean(metadata)}`);
-    console.error(`Loaded description: ${Boolean(description)}`);
-    console.error(`Loaded transcript: ${Boolean(transcriptRaw)} (${transcriptRaw?.length ?? 0} chars)`);
-    console.error(`Loaded visual context: ${Boolean(visualContext)}`);
-    console.error(`Found frame manifests: ${manifests.length}`);
-    console.error(`Found scout manifests: ${scoutManifests.length}`);
+function logLoadedAssets(assets: ContextAssets, options: ContextOptions): void {
+  if (!options.verbose) {
+    return;
   }
+  console.error(`Loaded metadata: ${Boolean(assets.metadata)}`);
+  console.error(`Loaded description: ${Boolean(assets.description)}`);
+  console.error(
+    `Loaded transcript: ${Boolean(assets.transcriptRaw)} (${assets.transcriptRaw?.length ?? 0} chars)`
+  );
+  console.error(`Loaded visual context: ${Boolean(assets.visualContext)}`);
+  console.error(`Found frame manifests: ${assets.manifests.length}`);
+  console.error(`Found scout manifests: ${assets.scoutManifests.length}`);
+}
 
-  const provenance = buildProvenance({
-    metadata: Boolean(metadata),
-    description: Boolean(description),
-    transcript: Boolean(transcriptRaw),
-    visualContext: Boolean(visualContext),
-    scoutManifests: scoutManifests.length
-  });
-
-  const transcriptSection = transcriptRaw
-    ? buildTranscriptSection(transcriptRaw)
-    : "_No transcript.srt or transcript.vtt found._";
-
+function renderContext(
+  videoFolder: string,
+  question: string | undefined,
+  assets: ContextAssets
+): string {
   return [
     "# YouTube AI Context",
     "",
     "## Source Provenance",
     "",
-    provenance,
+    buildProvenance({
+      metadata: Boolean(assets.metadata),
+      description: Boolean(assets.description),
+      transcript: Boolean(assets.transcriptRaw),
+      visualContext: Boolean(assets.visualContext),
+      scoutManifests: assets.scoutManifests.length
+    }),
     "",
-    question ? `## Question\n\n${question}\n` : "## Task\n\nSummarize this video using timestamps where possible.\n",
+    renderTaskSection(question),
     "## Instructions",
     "",
     "- Use the transcript, metadata, and visual context as primary evidence.",
@@ -101,33 +125,49 @@ async function buildContext(
     "",
     "## Metadata",
     "",
-    metadata ? fenced("json", metadata) : "_No metadata.info.json found._",
+    renderMetadata(assets.metadata),
     "",
     "## Description",
     "",
-    description ?? "_No description.txt found._",
+    assets.description ?? "_No description.txt found._",
     "",
     "## Transcript",
     "",
-    transcriptSection,
+    renderTranscript(assets.transcriptRaw),
     "",
     "## Visual Context",
     "",
-    visualContext ? visualContext.trim() : "_No analysis/visual-context.md found._",
+    assets.visualContext ? assets.visualContext.trim() : "_No analysis/visual-context.md found._",
     "",
     "## Frame Manifests",
     "",
-    manifests.length > 0
-      ? manifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
-      : "_No frames_manifest.json files found._",
+    renderManifestList(videoFolder, assets.manifests, "_No frames_manifest.json files found._"),
     "",
     "## Scout Manifests",
     "",
-    scoutManifests.length > 0
-      ? scoutManifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
-      : "_No scout-manifest.json files found._",
+    renderManifestList(videoFolder, assets.scoutManifests, "_No scout-manifest.json files found._"),
     ""
   ].join("\n");
+}
+
+function renderTaskSection(question: string | undefined): string {
+  return question
+    ? `## Question\n\n${question}\n`
+    : "## Task\n\nSummarize this video using timestamps where possible.\n";
+}
+
+function renderMetadata(metadata: string | undefined): string {
+  return metadata ? fenced("json", metadata) : "_No metadata.info.json found._";
+}
+
+function renderTranscript(transcriptRaw: string | undefined): string {
+  return transcriptRaw ? buildTranscriptSection(transcriptRaw) : "_No transcript.srt or transcript.vtt found._";
+}
+
+function renderManifestList(videoFolder: string, manifests: string[], fallback: string): string {
+  return manifests.length > 0
+    ? manifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
+    : fallback;
 }
 
 /**
@@ -174,51 +214,62 @@ type ProvenanceInputs = {
 };
 
 function buildProvenance(inputs: ProvenanceInputs): string {
-  const rows: string[] = [];
+  return [
+    ...buildAvailabilityRows(inputs),
+    "",
+    ...buildLimitationWarnings(inputs)
+  ].join("\n");
+}
 
-  if (inputs.transcript) {
-    rows.push("- ✅ **Transcript** — available (transcript.vtt / transcript.srt)");
-  } else {
-    rows.push("- ❌ **Transcript** — not available");
-  }
+function buildAvailabilityRows(inputs: ProvenanceInputs): string[] {
+  return [
+    availabilityRow(
+      inputs.transcript,
+      "Transcript",
+      "available (transcript.vtt / transcript.srt)",
+      "not available"
+    ),
+    availabilityRow(inputs.description, "Description", "available (description.txt)", "not available"),
+    availabilityRow(inputs.metadata, "Metadata", "available (metadata.info.json)", "not available"),
+    availabilityRow(
+      inputs.visualContext || inputs.scoutManifests > 0,
+      "Visual scout",
+      "available (contact sheet + frame samples)",
+      "not available (no video downloaded or scout not run)"
+    )
+  ];
+}
 
-  if (inputs.description) {
-    rows.push("- ✅ **Description** — available (description.txt)");
-  } else {
-    rows.push("- ❌ **Description** — not available");
-  }
+function availabilityRow(
+  available: boolean,
+  label: string,
+  availableText: string,
+  unavailableText: string
+): string {
+  return `- ${available ? "✅" : "❌"} **${label}** — ${available ? availableText : unavailableText}`;
+}
 
-  if (inputs.metadata) {
-    rows.push("- ✅ **Metadata** — available (metadata.info.json)");
-  } else {
-    rows.push("- ❌ **Metadata** — not available");
-  }
+function buildLimitationWarnings(inputs: ProvenanceInputs): string[] {
+  const warnings: string[] = [];
+  const hasTextSource = inputs.transcript || inputs.description || inputs.metadata;
 
-  if (inputs.visualContext || inputs.scoutManifests > 0) {
-    rows.push("- ✅ **Visual scout** — available (contact sheet + frame samples)");
-  } else {
-    rows.push("- ❌ **Visual scout** — not available (no video downloaded or scout not run)");
-  }
-
-  rows.push("");
-
-  if (!inputs.transcript && !inputs.description && !inputs.metadata) {
-    rows.push(
+  if (!hasTextSource) {
+    warnings.push(
       "⚠️ **Critical limitation**: No text sources available. Summary would be entirely speculative. Generate at least description and metadata first."
     );
-  } else if (!inputs.transcript && (inputs.description || inputs.metadata)) {
-    rows.push(
+  } else if (!inputs.transcript) {
+    warnings.push(
       "⚠️ **Transcript missing**: Summary is based on description and metadata only. No timestamped quotes or detailed dialogue are available."
     );
   }
 
   if (!inputs.visualContext && inputs.scoutManifests === 0) {
-    rows.push(
+    warnings.push(
       "⚠️ **No visual evidence**: Cannot verify on-screen charts, slides, diagrams, or UI demos. Any claims about visuals are inferred from text only."
     );
   }
 
-  return rows.join("\n");
+  return warnings;
 }
 
 async function readOptional(filePath: string): Promise<string | undefined> {
