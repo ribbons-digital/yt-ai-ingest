@@ -36,6 +36,10 @@ export function warn(label: string, value?: string): void {
   console.warn(formatLine(figures.warning, ansis.yellow(label), value));
 }
 
+export function skip(label: string, reason?: string): void {
+  console.log(formatLine(figures.arrowRight, ansis.dim(label), reason));
+}
+
 export function error(label: string, value?: string): void {
   console.error(formatLine(figures.cross, ansis.red(label), value));
 }

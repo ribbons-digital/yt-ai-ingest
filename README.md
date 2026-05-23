@@ -20,8 +20,17 @@ brew install yt-dlp ffmpeg
 
 ```bash
 ytai prepare "YOUTUBE_URL"
+ytai prepare "YOUTUBE_URL" --transcript-only
+ytai prepare "YOUTUBE_URL" --rate-limit
+ytai prepare "YOUTUBE_URL" --cookies-from-browser chrome
+ytai prepare "YOUTUBE_URL" --resume
 ytai prepare "YOUTUBE_URL" --scout-interval 30 --scout-columns 5
 ytai ingest "YOUTUBE_URL"
+ytai ingest "YOUTUBE_URL" --transcript-only
+ytai ingest "YOUTUBE_URL" --rate-limit
+ytai ingest "YOUTUBE_URL" --cookies-from-browser chrome
+ytai resume ./videos/video-folder
+ytai resume ./videos/video-folder --rate-limit --cookies-from-browser chrome
 ytai clip "YOUTUBE_URL" --from 03:20 --to 05:10
 ytai clip "YOUTUBE_URL" --from 03:20 --to 05:10 --force-keyframes
 ytai frames ./videos/video-folder --around 12:30
@@ -73,21 +82,55 @@ contact sheet:
 ytai prepare "YOUTUBE_URL" --scout-interval 30 --scout-columns 5
 ```
 
+## Transcript Handling
+
+`ytai` always extracts the full transcript (`.vtt` / `.srt`) during ingest. When `summarize` generates `analysis/summary-input.md`, the transcript section works as follows:
+
+| Transcript size | Behavior |
+|-----------------|----------|
+| ≤ 16K characters | Full raw transcript included verbatim |
+| > 16K characters | Parsed into **5-minute timestamped chunks** covering the entire video duration |
+
+This ensures the AI agent can see content from the **full video**, not just the opening minutes. Each chunk includes a time range (e.g., `10:00 → 15:00`) and the raw transcript text for that period — critical for investment analysis where stock targets and risk management often appear in the latter half.
+
+## Anti-429 Options
+
+When YouTube rate-limits downloads (HTTP 429), use these flags:
+
+```bash
+# Slow down requests
+ytai prepare "URL" --rate-limit
+
+# Use authenticated cookies (biggest 429 reduction)
+ytai prepare "URL" --cookies-from-browser chrome
+
+# Skip video entirely — only fetch transcript and metadata
+ytai prepare "URL" --transcript-only
+
+# Resume a partial ingest (only fills missing assets)
+ytai prepare "URL" --resume
+ytai resume ./videos/partial-folder --cookies-from-browser chrome
+```
+
 ## Output Structure
 
 `ytai ingest` writes to `videos/YYYY-MM-DD_video-title_videoid/`:
 
 ```text
-source.mp4
-audio.wav
-transcript.srt
-transcript.vtt
-metadata.info.json
-description.txt
-thumbnail.jpg
+source.mp4                      # video (may be missing on rate-limit)
+audio.wav                       # extracted audio (only if video exists)
+transcript.vtt                  # full YouTube transcript
+transcript.srt                  # converted transcript
+description.txt                 # video description
+metadata.info.json              # yt-dlp metadata
+thumbnail.jpg                   # video thumbnail
+ingest-status.json              # machine-readable asset record
 frames/
 clips/
 analysis/
+  summary-input.md              # includes timestamped transcript chunks
+  visual-context.md             # (after scout)
+  scout-manifest.json           # (after scout)
 ```
 
 Some assets depend on what YouTube and `yt-dlp` can provide for the source video.
@@ -155,7 +198,7 @@ analysis/summary-input.md
 analysis/question-input.md
 ```
 
-These files include metadata, description, transcript excerpts, and frame manifests. Future integrations can add OpenAI or Gemini calls on top of these context builders.
+These files include metadata, description, **full transcript** (or timestamped chunk index for long videos), and frame manifests. Future integrations can add OpenAI or Gemini calls on top of these context builders.
 
 If `analysis/visual-context.md` or `analysis/scout-manifest.json` exists, the
 generated prompt also includes those visual scouting artifacts so agents can

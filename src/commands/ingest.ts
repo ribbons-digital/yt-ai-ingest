@@ -8,27 +8,186 @@ import {
   ensureDir,
   findFirstFile,
   moveIfExists,
-  safeSlug
+  pathExists,
+  safeSlug,
+  writeJson
 } from "../lib/files.js";
 import { findSourceVideo } from "../lib/media.js";
 import { ingestedFolderAgentPrompt } from "../lib/agentPrompt.js";
-import { runCommand, type RunOptions } from "../lib/process.js";
-import { block, section, startSpinner, success } from "../lib/ui.js";
+import { runCommand, type RunOptions, type RunResult } from "../lib/process.js";
+import { block, section, startSpinner, success, warn } from "../lib/ui.js";
 
-type IngestOptions = RunOptions & {
+export type IngestedAssets = {
+  metadata: boolean;
+  description: boolean;
+  transcript: boolean;
+  video: boolean;
+  audio: boolean;
+  thumbnail: boolean;
+};
+
+export type IngestResult = {
+  videoFolder: string;
+  assets: IngestedAssets;
+  warnings: string[];
+};
+
+export type IngestOptions = RunOptions & {
   outDir: string;
   showProgress?: boolean;
   promptVideoFolder?: (defaultFolder: string) => Promise<string | undefined>;
+  transcriptOnly?: boolean;
+  rateLimit?: boolean;
+  cookiesFromBrowser?: string;
+  cookiesPath?: string;
+};
+
+export type IngestStatus = {
+  url: string;
+  videoFolder: string;
+  timestamp: string;
+  assets: IngestedAssets;
+  warnings: string[];
 };
 
 type YtDlpMetadata = {
   id?: string;
   title?: string;
+  webpage_url?: string;
 };
 
-export async function ingest(url: string, options: IngestOptions): Promise<string> {
+export type YtDlpErrorCategory =
+  | "rate_limit"
+  | "video_unavailable"
+  | "age_restricted"
+  | "geo_blocked"
+  | "no_formats"
+  | "network_error"
+  | "unknown";
+
+export type YtDlpErrorInfo = {
+  category: YtDlpErrorCategory;
+  message: string;
+  suggestion: string;
+};
+
+export function classifyYtDlpError(stderr: string, exitCode: number): YtDlpErrorInfo {
+  const lower = stderr.toLowerCase();
+
+  if (stderr.includes("HTTP Error 429") || stderr.includes("Too Many Requests") || stderr.includes("http error 429")) {
+    return {
+      category: "rate_limit",
+      message: "YouTube rate limit (HTTP 429)",
+      suggestion: "Try --cookies-from-browser chrome to authenticate with YouTube, or --rate-limit to slow requests"
+    };
+  }
+  if (stderr.includes("Video unavailable") || stderr.includes("HTTP Error 404") || stderr.includes("http error 404")) {
+    return {
+      category: "video_unavailable",
+      message: "Video not found or unavailable",
+      suggestion: "Check the URL and whether the video is private or deleted"
+    };
+  }
+  if (lower.includes("age") || lower.includes("sign in to confirm")) {
+    return {
+      category: "age_restricted",
+      message: "Age-restricted video",
+      suggestion: "Try --cookies-from-browser chrome with a logged-in YouTube account"
+    };
+  }
+  if (lower.includes("blocked") || lower.includes("not available in your country") || lower.includes("geo")) {
+    return {
+      category: "geo_blocked",
+      message: "Video is geo-blocked in your region",
+      suggestion: "Try --proxy with a supported proxy or VPN"
+    };
+  }
+  if (lower.includes("no video formats found")) {
+    return {
+      category: "no_formats",
+      message: "No downloadable video formats found",
+      suggestion: "Try --transcript-only to at least fetch the transcript and metadata"
+    };
+  }
+  if (lower.includes("timeout") || lower.includes("connection") || lower.includes("reset by peer")) {
+    return {
+      category: "network_error",
+      message: "Network error during download",
+      suggestion: "Check your internet connection and try again, or use --rate-limit to add delays"
+    };
+  }
+  return {
+    category: "unknown",
+    message: `yt-dlp exited with code ${exitCode}`,
+    suggestion: "Check the URL and your network connection, or retry later"
+  };
+}
+
+export function ingestStatusPath(videoFolder: string): string {
+  return path.join(videoFolder, "ingest-status.json");
+}
+
+export function buildYtDlpArgs(url: string, videoFolder: string, options: IngestOptions): string[] {
+  const args: string[] = [
+    "--no-playlist"
+  ];
+
+  // Rate-limiting flags
+  if (options.rateLimit) {
+    args.push(
+      "--sleep-requests", "1",
+      "--sleep-interval", "1",
+      "--max-sleep-interval", "5",
+      "--retries", "10",
+      "--fragment-retries", "10"
+    );
+  }
+
+  // Cookies
+  if (options.cookiesFromBrowser) {
+    args.push("--cookies-from-browser", options.cookiesFromBrowser);
+  }
+  if (options.cookiesPath) {
+    args.push("--cookies", options.cookiesPath);
+  }
+
+  if (options.transcriptOnly) {
+    args.push(
+      "--skip-download",
+      "--write-info-json",
+      "--write-description",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs", "en.*",
+      "--sub-format", "vtt/best",
+      "-o", path.join(videoFolder, "source.%(ext)s"),
+      url
+    );
+  } else {
+    args.push(
+      "--write-thumbnail",
+      "--write-info-json",
+      "--write-description",
+      "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+      "--merge-output-format", "mp4",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs", "en.*",
+      "--sub-format", "vtt/best",
+      "-o", path.join(videoFolder, "source.%(ext)s"),
+      url
+    );
+  }
+
+  return args;
+}
+
+export async function ingest(url: string, options: IngestOptions): Promise<IngestResult> {
   if (!options.dryRun) {
-    await ensureDependencies(["yt-dlp", "ffmpeg"], options.verbose);
+    await ensureDependencies(["yt-dlp"], options.verbose);
+    if (!options.transcriptOnly) {
+      await ensureDependencies(["ffmpeg"], options.verbose);
+    }
   }
 
   const metadataSpinner = startSpinner("Reading video metadata...", {
@@ -54,64 +213,196 @@ export async function ingest(url: string, options: IngestOptions): Promise<strin
   await ensureDir(path.join(videoFolder, "clips"));
   await ensureDir(path.join(videoFolder, "analysis"));
 
-  const spinner = startSpinner("Downloading video assets...", {
+  const downloadLabel = options.transcriptOnly ? "Downloading transcript and metadata..." : "Downloading video assets...";
+  const spinner = startSpinner(downloadLabel, {
     enabled: shouldShowProgress(options)
   });
+  let downloadResult: RunResult;
   try {
-    await runCommand(
+    downloadResult = await runCommand(
       "yt-dlp",
-      [
-        "--no-playlist",
-        "--write-info-json",
-        "--write-description",
-        "--write-thumbnail",
-        "--convert-thumbnails",
-        "jpg",
-        "--write-subs",
-        "--write-auto-subs",
-        "--sub-langs",
-        "en.*",
-        "--sub-format",
-        "vtt/best",
-        "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
-        "--merge-output-format",
-        "mp4",
-        "-o",
-        path.join(videoFolder, "source.%(ext)s"),
-        url
-      ],
-      options
+      buildYtDlpArgs(url, videoFolder, options),
+      { ...options, allowFailure: true }
     );
-    spinner.succeed("Downloaded video assets");
+    spinner.succeed(options.transcriptOnly ? "Downloaded transcript and metadata" : "Downloaded video assets");
   } catch (error) {
-    spinner.fail("Download failed");
+    spinner.fail(options.transcriptOnly ? "Download failed" : "Download failed");
     throw error;
+  }
+
+  const warnings: string[] = [];
+  if (downloadResult.code !== 0) {
+    const hasInfoJson = await pathExists(path.join(videoFolder, "source.info.json"));
+    const hasVtt =
+      (await findFirstFile(videoFolder, (name) => /^source\..*\.vtt$/i.test(name))) !== undefined;
+    const hasSourceVideo =
+      (await findFirstFile(videoFolder, (name) => /^source\.(mp4|mkv|webm|mov)$/i.test(name))) !== undefined;
+    const hasSomeAssets = options.transcriptOnly
+      ? hasInfoJson || hasVtt
+      : hasInfoJson || hasSourceVideo || hasVtt;
+
+    if (hasSomeAssets) {
+      const partialAssets = [hasInfoJson ? "metadata" : "", hasSourceVideo ? "video" : "", hasVtt ? "subtitles" : ""].filter(Boolean).join(", ");
+      warn("Partial download", partialAssets);
+      warnings.push(`yt-dlp exited with code ${downloadResult.code} but partial assets found (${partialAssets}) — continuing`);
+    } else {
+      spinner.fail("Download failed");
+      const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
+      const suggestion = options.transcriptOnly
+        ? ""
+        : ` Try --transcript-only to fetch only text assets. ${errorInfo.suggestion}`;
+      throw new Error(`${errorInfo.message}.${suggestion}`);
+    }
   }
 
   if (options.dryRun) {
     if (!options.quiet) {
       console.log(`Would normalize artifacts in ${videoFolder}`);
     }
-    return videoFolder;
+    const assets: IngestedAssets = {
+      metadata: true,
+      description: true,
+      transcript: true,
+      video: !options.transcriptOnly,
+      audio: !options.transcriptOnly,
+      thumbnail: !options.transcriptOnly
+    };
+    return { videoFolder, assets, warnings };
   }
 
   const normalizeSpinner = startSpinner("Normalizing local assets...", {
     enabled: shouldShowProgress(options)
   });
-  try {
-    await normalizeArtifacts(videoFolder, options);
-    normalizeSpinner.succeed("Normalized local assets");
-  } catch (error) {
-    normalizeSpinner.fail("Normalization failed");
-    throw error;
+  const assets = await normalizeArtifacts(videoFolder, options);
+  normalizeSpinner.succeed("Normalized local assets");
+
+  // Write ingest status
+  await writeIngestStatus(videoFolder, url, assets, warnings);
+
+  const canSummarize = assets.metadata || assets.description || assets.transcript;
+  const canScout = assets.video;
+  if (!canSummarize && !canScout) {
+    throw new Error("No usable assets were produced by yt-dlp (no video, transcript, or metadata).");
   }
+
   if (!options.quiet) {
-    success("Ingested assets", videoFolder);
+    success(options.transcriptOnly ? "Transcript and metadata" : "Ingested assets", videoFolder);
+    if (options.transcriptOnly) {
+      warn("Transcript-only mode — no video downloaded");
+    }
+    if (!canScout) {
+      warn("No video available — scout step will be skipped");
+    }
     section("Agent Prompt");
     block(ingestedFolderAgentPrompt(videoFolder));
   }
-  return videoFolder;
+  return { videoFolder, assets, warnings };
+}
+
+async function writeIngestStatus(
+  videoFolder: string,
+  url: string,
+  assets: IngestedAssets,
+  warnings: string[]
+): Promise<void> {
+  const status: IngestStatus = {
+    url,
+    videoFolder,
+    timestamp: new Date().toISOString(),
+    assets,
+    warnings
+  };
+  await writeJson(ingestStatusPath(videoFolder), status);
+}
+
+export async function readIngestStatus(videoFolder: string): Promise<IngestStatus | undefined> {
+  const filePath = ingestStatusPath(videoFolder);
+  if (!(await pathExists(filePath))) {
+    return undefined;
+  }
+  try {
+    const { readFile } = await import("node:fs/promises");
+    return JSON.parse(await readFile(filePath, "utf8")) as IngestStatus;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function resumeIngest(videoFolder: string, options: IngestOptions): Promise<IngestResult> {
+  const status = await readIngestStatus(videoFolder);
+  if (!status) {
+    throw new Error(`No ingest-status.json found in ${videoFolder}. Cannot resume.`);
+  }
+
+  const url = status.url;
+  const previousAssets = status.assets;
+  const warnings: string[] = [...status.warnings];
+
+  if (!options.quiet) {
+    success("Resuming ingest", videoFolder);
+    const missing: string[] = [];
+    if (!previousAssets.metadata) missing.push("metadata");
+    if (!previousAssets.description) missing.push("description");
+    if (!previousAssets.transcript) missing.push("transcript");
+    if (!previousAssets.video) missing.push("video");
+    if (missing.length > 0) {
+      warn("Missing assets", missing.join(", "));
+    } else {
+      warn("All assets already present", "nothing to resume");
+    }
+  }
+
+  if (!options.dryRun) {
+    await ensureDependencies(["yt-dlp"], options.verbose);
+  }
+
+  const downloadLabel = "Resuming download...";
+  const spinner = startSpinner(downloadLabel, {
+    enabled: shouldShowProgress(options)
+  });
+  let downloadResult: RunResult;
+  try {
+    downloadResult = await runCommand(
+      "yt-dlp",
+      buildYtDlpArgs(url, videoFolder, options),
+      { ...options, allowFailure: true }
+    );
+    spinner.succeed("Resume download complete");
+  } catch (error) {
+    spinner.fail("Resume download failed");
+    throw error;
+  }
+
+  if (downloadResult.code !== 0) {
+    warnings.push(`yt-dlp exited with code ${downloadResult.code} during resume`);
+    const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
+    warn("Resume download warning", errorInfo.message);
+  }
+
+  if (options.dryRun) {
+    return {
+      videoFolder,
+      assets: {
+        metadata: true,
+        description: true,
+        transcript: true,
+        video: true,
+        audio: true,
+        thumbnail: true
+      },
+      warnings
+    };
+  }
+
+  const normalizeSpinner = startSpinner("Normalizing resumed assets...", {
+    enabled: shouldShowProgress(options)
+  });
+  const assets = await normalizeArtifacts(videoFolder, options);
+  normalizeSpinner.succeed("Normalization complete");
+
+  await writeIngestStatus(videoFolder, url, assets, warnings);
+
+  return { videoFolder, assets, warnings };
 }
 
 function shouldShowProgress(options: IngestOptions): boolean {
@@ -160,22 +451,55 @@ async function readVideoMetadata(url: string, options: RunOptions): Promise<YtDl
   return JSON.parse(result.stdout) as YtDlpMetadata;
 }
 
-async function normalizeArtifacts(videoFolder: string, options: RunOptions): Promise<void> {
-  await moveIfExists(
+export async function normalizeArtifacts(
+  videoFolder: string,
+  options: RunOptions
+): Promise<IngestedAssets> {
+  const assets: IngestedAssets = {
+    metadata: false,
+    description: false,
+    transcript: false,
+    video: false,
+    audio: false,
+    thumbnail: false
+  };
+
+  assets.metadata = await moveIfExists(
     await findFirstFile(videoFolder, (name) => name === "source.info.json"),
     path.join(videoFolder, "metadata.info.json")
   );
-  await moveIfExists(
+  assets.description = await moveIfExists(
     await findFirstFile(videoFolder, (name) => name === "source.description"),
     path.join(videoFolder, "description.txt")
   );
-  await moveIfExists(
-    await findFirstFile(videoFolder, (name) => /^source\.(jpg|jpeg)$/i.test(name)),
-    path.join(videoFolder, "thumbnail.jpg")
+
+  // Best-effort thumbnail conversion (yt-dlp downloads source.webp/png; we convert to thumbnail.jpg)
+  const thumbnailSource = await findFirstFile(videoFolder, (name) =>
+    /^source\.(webp|jpg|jpeg|png)$/i.test(name)
   );
+  if (thumbnailSource) {
+    const ext = path.extname(thumbnailSource).toLowerCase();
+    if (ext === ".jpg" || ext === ".jpeg") {
+      assets.thumbnail = await moveIfExists(thumbnailSource, path.join(videoFolder, "thumbnail.jpg"));
+    } else {
+      try {
+        await runCommand(
+          "ffmpeg",
+          ["-y", "-i", thumbnailSource, path.join(videoFolder, "thumbnail.jpg")],
+          { ...options, allowFailure: false }
+        );
+        assets.thumbnail = true;
+      } catch {
+        warn("Thumbnail conversion failed", path.basename(thumbnailSource));
+        // Keep original file as a fallback
+        await moveIfExists(thumbnailSource, path.join(videoFolder, `thumbnail${ext}`));
+      }
+    }
+  }
 
   const vtt = await findFirstFile(videoFolder, (name) => /^source\..*\.vtt$/i.test(name));
   if (await copyIfExists(vtt, path.join(videoFolder, "transcript.vtt"))) {
+    assets.transcript = true;
     await runCommand(
       "ffmpeg",
       ["-y", "-i", path.join(videoFolder, "transcript.vtt"), path.join(videoFolder, "transcript.srt")],
@@ -183,10 +507,22 @@ async function normalizeArtifacts(videoFolder: string, options: RunOptions): Pro
     );
   }
 
-  const sourceVideo = await findSourceVideo(videoFolder);
-  await runCommand(
-    "ffmpeg",
-    ["-y", "-i", sourceVideo, "-vn", "-ac", "1", "-ar", "16000", path.join(videoFolder, "audio.wav")],
-    options
+  const sourceVideo = await findFirstFile(videoFolder, (name) =>
+    /^source\.(mp4|mkv|webm|mov)$/i.test(name)
   );
+  if (sourceVideo) {
+    assets.video = true;
+    try {
+      await runCommand(
+        "ffmpeg",
+        ["-y", "-i", sourceVideo, "-vn", "-ac", "1", "-ar", "16000", path.join(videoFolder, "audio.wav")],
+        options
+      );
+      assets.audio = true;
+    } catch {
+      warn("Audio extraction failed", path.basename(sourceVideo));
+    }
+  }
+
+  return assets;
 }

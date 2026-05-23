@@ -1,4 +1,5 @@
 @RTK.md
+@CLAUDE.md
 
 # Project Instructions
 

@@ -1,3 +1,4 @@
+import type { IngestedAssets } from "../commands/ingest.js";
 import path from "node:path";
 
 export function preparedFolderAgentPrompt(videoFolder: string): string {
@@ -16,6 +17,48 @@ export function preparedFolderAgentPrompt(videoFolder: string): string {
     "",
     `Video folder: ${videoFolder}`
   ].join("\n");
+}
+
+export function degradedFolderAgentPrompt(
+  videoFolder: string,
+  assets: IngestedAssets
+): string {
+  const lines = [
+    "Please analyze this ytai video folder and produce a summary based on the available evidence.",
+    ""
+  ];
+
+  if (assets.transcript) {
+    lines.push(
+      "Start with analysis/summary-input.md which contains the transcript and metadata."
+    );
+  } else if (assets.description || assets.metadata) {
+    lines.push(
+      "Start with analysis/summary-input.md which contains description and metadata. No transcript is available."
+    );
+  } else {
+    lines.push("Limited context available. Start with analysis/summary-input.md.");
+  }
+
+  lines.push("");
+
+  if (!assets.video) {
+    lines.push(
+      "⚠️ No video was downloaded (likely due to rate limiting). Visual evidence such as charts, slides, diagrams, and on-screen text is NOT available."
+    );
+    lines.push(
+      "Do not claim to have seen any visuals. Base your analysis solely on the text sources provided."
+    );
+  }
+
+  if (!assets.transcript) {
+    lines.push("⚠️ No transcript is available. Timestamps cannot be cited.");
+  }
+
+  lines.push("");
+  lines.push(`Video folder: ${videoFolder}`);
+
+  return lines.join("\n");
 }
 
 export function ingestedFolderAgentPrompt(videoFolder: string): string {

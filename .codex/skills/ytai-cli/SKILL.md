@@ -19,12 +19,86 @@ Use this skill when changing the `ytai` TypeScript CLI in this repository.
 ## Architecture
 
 - `src/cli.ts`: `commander` routing and user-facing flags.
-- `src/commands/`: command implementations for `prepare`, `ingest`, `clip`, `frames`, `scout`, `summarize`, and `ask`.
+- `src/commands/ingest.ts`: yt-dlp integration, `IngestResult`/`IngestedAssets`, `IngestStatus`, error classification (`classifyYtDlpError`), `buildYtDlpArgs`, `normalizeArtifacts`, `writeIngestStatus`, `resumeIngest`.
+- `src/commands/prepare.ts`: orchestrates `ingest → scout → summarize`; handles `--resume` by reading `ingest-status.json`.
+- `src/commands/scout.ts`: visual frame sampling and contact sheet generation.
+- `src/commands/context.ts`: `summarize` (writes `analysis/summary-input.md` with source provenance) and `ask` (writes `analysis/qna-context.md`).
+- `src/commands/clip.ts`: timestamp-based clip extraction via yt-dlp.
+- `src/commands/frames.ts`: frame extraction with `select`, `seek`, `auto` modes.
 - `src/lib/timestamps.ts`: timestamp and range parsing.
 - `src/lib/frameMode.ts`: `select`, `seek`, and `auto` frame-mode choice.
 - `src/lib/scoutPlan.ts`: automatic visual-scout timeline planning.
 - `src/lib/process.ts`: safe `spawn` wrapper and dry-run command rendering.
-- `src/lib/ui.ts`: shared CLI output helpers for colors, symbols, and spinners.
+- `src/lib/ui.ts`: shared CLI output helpers for colors, symbols, spinners, and `skip()`.
+- `src/lib/agentPrompt.ts`: `preparedFolderAgentPrompt` and `degradedFolderAgentPrompt` for text-only analysis.
+- `src/lib/transcriptChunks.ts`: transcript parsing and timestamp-based chunking for full-duration coverage.
 - `src/lib/files.ts` and `src/lib/media.ts`: filesystem and media helpers.
 
 Read `references/cli-behavior.md` when changing command behavior or output structure.
+
+## Key Types
+
+| Type | File | Purpose |
+|------|------|---------|
+| `IngestResult` | `ingest.ts` | Return type: `{ videoFolder, assets: IngestedAssets, warnings }` |
+| `IngestedAssets` | `ingest.ts` | Asset map: metadata, description, transcript, video, audio, thumbnail |
+| `IngestStatus` | `ingest.ts` | Written to `ingest-status.json`: URL, timestamp, assets, warnings |
+| `IngestOptions` | `ingest.ts` | Options: `transcriptOnly`, `rateLimit`, `cookiesFromBrowser`, `cookiesPath`, `resume` |
+| `YtDlpErrorCategory` | `ingest.ts` | Enum: rate_limit, video_unavailable, age_restricted, geo_blocked, no_formats, network_error, unknown |
+| `YtDlpErrorInfo` | `ingest.ts` | Classified error: `{ category, message, suggestion }` |
+
+## CLI Flags
+
+| Flag | Commands | Purpose |
+|------|----------|---------|
+| `--transcript-only` | ingest, prepare | Skip video download — only fetch transcript/description/metadata |
+| `--rate-limit` | ingest, prepare, resume | Inject yt-dlp sleep/retry flags to avoid 429 errors |
+| `--cookies-from-browser` | ingest, prepare, resume | Pass browser cookies to yt-dlp for authentication |
+| `--cookies` | ingest, prepare, resume | Pass cookies.txt path to yt-dlp |
+| `--resume` | prepare | Resume partial ingest — reads `ingest-status.json`, fills gaps |
+
+## Transcript Chunking
+
+When `summary-input.md` is generated from a long transcript (>16K chars), ytai **no longer truncates to the first 16K characters**. Instead:
+
+1. The VTT/SRT transcript is parsed into timestamped cues.
+2. Cues are grouped into **5-minute chunks** (configurable via `chunkSec`).
+3. Each chunk includes: time range label (e.g., `05:00 → 10:00`), and a text preview (default 3K chars per chunk).
+4. The full chunk index is inserted into `summary-input.md` under `## Transcript`.
+
+This ensures the AI agent can see content from the **entire video duration**, not just the opening minutes — critical for investment analysis where targets and risk management often appear in the latter half.
+
+### Key functions
+
+| Function | File | Purpose |
+|----------|------|---------|
+| `chunkTranscript(transcript, opts)` | `transcriptChunks.ts` | Parse VTT/SRT → `ChunkedTranscript` with timestamped chunks |
+| `formatChunkIndex(chunked)` | `transcriptChunks.ts` | Format chunks as markdown for `summary-input.md` |
+| `buildTranscriptSection(raw)` | `context.ts` | Decides raw excerpt vs chunked index based on length |
+
+### Thresholds
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| Raw excerpt threshold | 16K chars | Shorter transcripts are included verbatim |
+| Chunk duration | 300s (5 min) | Groups cues into time windows |
+| Preview per chunk | 3K chars | Text preview for each chunk |
+| Total section budget | 80K chars | Auto-shrinks preview if chunked output exceeds this |
+
+## Pipeline Design
+
+- `ingest()` returns `IngestResult`, not just a folder path. Downstream commands inspect `assets` to decide what to run.
+- Partial yt-dlp output: `allowFailure: true`, checks for `source.info.json`, video, `.vtt` after non-zero exit. Continues if any exist.
+- `prepare()` conditionally runs scout (needs video) and summarize (needs any text). Uses `skip()` for skipped steps.
+- `--resume` does a dry-run ingest to determine the folder path, reads `ingest-status.json`, then calls `resumeIngest()` to fill missing assets.
+- Every ingest run writes `ingest-status.json` for resume tracking.
+
+## Anti-429 Strategy
+
+| Approach | Implementation |
+|----------|----------------|
+| Minimize requests | `--transcript-only` skips video entirely |
+| Slow down | `--rate-limit` adds `--sleep-requests`, `--max-sleep-interval`, `--retries` |
+| Authenticate | `--cookies-from-browser` or `--cookies` |
+| Resume partial | `--resume` reads status, only fetches missing assets |
+| Error guidance | `classifyYtDlpError()` returns actionable suggestions |

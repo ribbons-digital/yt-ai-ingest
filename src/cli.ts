@@ -3,7 +3,7 @@ import { Command, InvalidArgumentError } from "commander";
 import { ask, summarize } from "./commands/context.js";
 import { clip } from "./commands/clip.js";
 import { frames } from "./commands/frames.js";
-import { ingest } from "./commands/ingest.js";
+import { ingest, resumeIngest } from "./commands/ingest.js";
 import { prepare } from "./commands/prepare.js";
 import { scout } from "./commands/scout.js";
 import type { RequestedFrameMode } from "./lib/frameMode.js";
@@ -22,9 +22,33 @@ program
   .description("Download a YouTube video into an AI-ready local asset folder")
   .argument("<url>", "YouTube URL")
   .option("--out-dir <dir>", "base output directory", "videos")
-  .action(async (url: string, options: { outDir: string }) => {
-    await runCli(() => ingest(url, { ...globalOptions(), ...options }));
-  });
+  .option("--transcript-only", "skip video download, only fetch transcript, description, and metadata")
+  .option("--rate-limit", "add delays between requests to avoid YouTube rate limits")
+  .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
+  .option("--cookies <path>", "path to a cookies.txt file for authentication")
+  .action(
+    async (
+      url: string,
+      options: {
+        outDir: string;
+        transcriptOnly?: boolean;
+        rateLimit?: boolean;
+        cookiesFromBrowser?: string;
+        cookies?: string;
+      }
+    ) => {
+      await runCli(() =>
+        ingest(url, {
+          ...globalOptions(),
+          outDir: options.outDir,
+          transcriptOnly: options.transcriptOnly,
+          rateLimit: options.rateLimit,
+          cookiesFromBrowser: options.cookiesFromBrowser,
+          cookiesPath: options.cookies
+        })
+      );
+    }
+  );
 
 program
   .command("prepare")
@@ -33,6 +57,11 @@ program
   .option("--out-dir <dir>", "base output directory", "videos")
   .option("--scout-interval <seconds>", "seconds between sampled scout frames", parsePositiveInteger, 60)
   .option("--scout-columns <number>", "contact sheet columns", parsePositiveInteger, 4)
+  .option("--transcript-only", "skip video download, only fetch transcript, description, and metadata")
+  .option("--rate-limit", "add delays between requests to avoid YouTube rate limits")
+  .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
+  .option("--cookies <path>", "path to a cookies.txt file for authentication")
+  .option("--resume", "resume a previous partial ingest; fill in missing assets")
   .action(
     async (
       url: string,
@@ -40,9 +69,55 @@ program
         outDir: string;
         scoutInterval: number;
         scoutColumns: number;
+        transcriptOnly?: boolean;
+        rateLimit?: boolean;
+        cookiesFromBrowser?: string;
+        cookies?: string;
+        resume?: boolean;
       }
     ) => {
-      await runCli(() => prepare(url, { ...globalOptions(), ...options }));
+      await runCli(() =>
+        prepare(url, {
+          ...globalOptions(),
+          outDir: options.outDir,
+          scoutInterval: options.scoutInterval,
+          scoutColumns: options.scoutColumns,
+          transcriptOnly: options.transcriptOnly,
+          rateLimit: options.rateLimit,
+          cookiesFromBrowser: options.cookiesFromBrowser,
+          cookiesPath: options.cookies,
+          resume: options.resume
+        })
+      );
+    }
+  );
+
+program
+  .command("resume")
+  .description("Resume a previous partial ingest on an existing video folder")
+  .argument("<video-folder>", "folder created by ytai ingest (must contain ingest-status.json)")
+  .option("--rate-limit", "add delays between requests to avoid YouTube rate limits")
+  .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
+  .option("--cookies <path>", "path to a cookies.txt file for authentication")
+  .action(
+    async (
+      videoFolder: string,
+      options: {
+        rateLimit?: boolean;
+        cookiesFromBrowser?: string;
+        cookies?: string;
+      }
+    ) => {
+      await runCli(() =>
+        resumeIngest(videoFolder, {
+          ...globalOptions(),
+          outDir: "",
+          rateLimit: options.rateLimit,
+          cookiesFromBrowser: options.cookiesFromBrowser,
+          cookiesPath: options.cookies,
+          quiet: false
+        })
+      );
     }
   );
 
@@ -139,10 +214,10 @@ program
 await program.parseAsync();
 
 function globalOptions(): { dryRun?: boolean; verbose?: boolean } {
-  const options = program.opts<{ dryRun?: boolean; verbose?: boolean }>();
+  const opts = program.opts<{ dryRun?: boolean; verbose?: boolean }>();
   return {
-    dryRun: options.dryRun,
-    verbose: options.verbose
+    dryRun: opts.dryRun,
+    verbose: opts.verbose
   };
 }
 
