@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRunStdio } from "../src/lib/process.js";
+import { resolveRunStdio, runCommand } from "../src/lib/process.js";
 
 describe("resolveRunStdio", () => {
   it("captures external command output by default", () => {
@@ -12,5 +12,15 @@ describe("resolveRunStdio", () => {
 
   it("captures output when requested even in verbose mode", () => {
     expect(resolveRunStdio({ verbose: true, capture: true })).toBe("pipe");
+  });
+
+  it("notifies stdout chunks when output is piped", async () => {
+    const chunks: string[] = [];
+
+    await runCommand("node", ["-e", "process.stdout.write('[download] 12.3%')"], {
+      onStdoutChunk: (chunk) => chunks.push(chunk)
+    });
+
+    expect(chunks.join("")).toContain("[download] 12.3%");
   });
 });

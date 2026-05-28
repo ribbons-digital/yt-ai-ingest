@@ -7,6 +7,8 @@ export type RunOptions = {
   cwd?: string;
   capture?: boolean;
   allowFailure?: boolean;
+  onStdoutChunk?: (chunk: string) => void;
+  onStderrChunk?: (chunk: string) => void;
 };
 
 export type RunResult = {
@@ -46,10 +48,14 @@ export async function runCommand(
 
     if (stdio === "pipe") {
       child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
+        const value = chunk.toString();
+        stdout += value;
+        options.onStdoutChunk?.(value);
       });
       child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+        const value = chunk.toString();
+        stderr += value;
+        options.onStderrChunk?.(value);
       });
     }
 

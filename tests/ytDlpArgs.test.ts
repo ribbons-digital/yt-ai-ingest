@@ -68,6 +68,35 @@ describe("buildYtDlpArgs", () => {
     expect(args).toContain("--write-subs");
   });
 
+  it("defaults video downloads to the best mp4 stream at or below 1080p", () => {
+    const args = buildYtDlpArgs("https://example.com", "/tmp/folder", {
+      outDir: "/tmp"
+    });
+    const formatIndex = args.indexOf("-f");
+
+    expect(formatIndex).toBeGreaterThanOrEqual(0);
+    expect(args[formatIndex + 1]).toBe(
+      "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/best[height<=1080]/best"
+    );
+  });
+
+  it("requests newline progress output so downloads can render a progress bar", () => {
+    const args = buildYtDlpArgs("https://example.com", "/tmp/folder", {
+      outDir: "/tmp"
+    });
+
+    expect(args).toContain("--newline");
+  });
+
+  it("does not cap transcript-only requests because no video is downloaded", () => {
+    const args = buildYtDlpArgs("https://example.com", "/tmp/folder", {
+      outDir: "/tmp",
+      transcriptOnly: true
+    });
+
+    expect(args.join(" ")).not.toContain("height<=1080");
+  });
+
   it("transcript-only mode still supports rate-limit and cookies", () => {
     const args = buildYtDlpArgs("https://example.com", "/tmp/folder", {
       outDir: "/tmp",

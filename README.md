@@ -69,6 +69,10 @@ ingest -> scout -> summarize
 The command downloads the video assets, samples visual context with default scout
 settings, and writes `analysis/summary-input.md`. Its output is grouped into
 the same three steps so long downloads and frame extraction are easier to follow.
+Video downloads default to the best MP4 stream at or below 1080p. If the source
+video is only available below 1080p, `ytai` uses the highest available matching
+stream. During the yt-dlp download, the CLI switches from the spinner to a
+`cli-progress` progress bar with a percentage when yt-dlp reports progress.
 
 Interactive `prepare` and `ingest` runs prompt for the final video folder before
 writing assets. Press Enter to accept the generated default, or enter a custom

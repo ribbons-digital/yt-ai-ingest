@@ -89,6 +89,8 @@ This ensures the AI agent can see content from the **entire video duration**, no
 
 - `ingest()` returns `IngestResult`, not just a folder path. Downstream commands inspect `assets` to decide what to run.
 - Partial yt-dlp output: `allowFailure: true`, checks for `source.info.json`, video, `.vtt` after non-zero exit. Continues if any exist.
+- Default video downloads are capped to the best MP4 stream at or below 1080p, falling back to the highest available stream when the source is below 1080p.
+- Non-verbose yt-dlp downloads keep raw output captured but parse `[download]` percentage lines to render a `cli-progress` progress bar.
 - `prepare()` conditionally runs scout (needs video) and summarize (needs any text). Uses `skip()` for skipped steps.
 - `--resume` does a dry-run ingest to determine the folder path, reads `ingest-status.json`, then calls `resumeIngest()` to fill missing assets.
 - Every ingest run writes `ingest-status.json` for resume tracking.

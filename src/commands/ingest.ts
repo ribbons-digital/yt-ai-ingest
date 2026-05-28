@@ -15,7 +15,7 @@ import {
 import { findSourceVideo } from "../lib/media.js";
 import { ingestedFolderAgentPrompt } from "../lib/agentPrompt.js";
 import { runCommand, type RunOptions, type RunResult } from "../lib/process.js";
-import { block, section, startSpinner, success, warn } from "../lib/ui.js";
+import { block, createDownloadProgressBar, section, startSpinner, success, warn } from "../lib/ui.js";
 
 export type IngestedAssets = {
   metadata: boolean;
@@ -55,6 +55,9 @@ type YtDlpMetadata = {
   title?: string;
   webpage_url?: string;
 };
+
+const DEFAULT_VIDEO_FORMAT =
+  "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/best[height<=1080]/best";
 
 type YtDlpErrorCategory =
   | "rate_limit"
@@ -168,7 +171,8 @@ export function buildYtDlpArgs(url: string, videoFolder: string, options: Ingest
       "--write-thumbnail",
       "--write-info-json",
       "--write-description",
-      "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+      "--newline",
+      "-f", DEFAULT_VIDEO_FORMAT,
       "--merge-output-format", "mp4",
       "--write-subs",
       "--write-auto-subs",
@@ -180,6 +184,14 @@ export function buildYtDlpArgs(url: string, videoFolder: string, options: Ingest
   }
 
   return args;
+}
+
+export function parseYtDlpDownloadProgress(line: string): number | undefined {
+  const match = /^\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line.trim());
+  if (!match) {
+    return undefined;
+  }
+  return Number(match[1]);
 }
 
 export async function ingest(url: string, options: IngestOptions): Promise<IngestResult> {
@@ -273,14 +285,43 @@ async function runYtDlpDownload(
   const spinner = startSpinner(labels.start, {
     enabled: shouldShowProgress(options)
   });
+  const progressBar = createDownloadProgressBar(labels.start, {
+    enabled: shouldShowProgress(options)
+  });
   try {
+    let lastProgress = -1;
+    let progressStarted = false;
+    const handleProgressChunk = (chunk: string) => {
+      for (const line of chunk.split(/\r|\n/)) {
+        const progress = parseYtDlpDownloadProgress(line);
+        if (progress === undefined || progress === lastProgress) {
+          continue;
+        }
+        lastProgress = progress;
+        if (!progressStarted) {
+          spinner.stop();
+          progressBar.start(progress);
+          progressStarted = true;
+          continue;
+        }
+        progressBar.update(progress);
+      }
+    };
     const result = await runCommand("yt-dlp", buildYtDlpArgs(url, videoFolder, options), {
       ...options,
-      allowFailure: true
+      allowFailure: true,
+      onStdoutChunk: handleProgressChunk,
+      onStderrChunk: handleProgressChunk
     });
-    spinner.succeed(labels.success);
+    if (progressStarted) {
+      progressBar.stop();
+      success(labels.success);
+    } else {
+      spinner.succeed(labels.success);
+    }
     return result;
   } catch (error) {
+    progressBar.stop();
     spinner.fail(labels.failure);
     throw error;
   }

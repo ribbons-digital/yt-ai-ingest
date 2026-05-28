@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-lane codex user-prompt-submit",
+            "timeoutSec": 10,
+            "statusMessage": "Retrieving relevant memory"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-lane codex stop",
+            "timeoutSec": 10,
+            "statusMessage": "Saving useful memory"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|shell:*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-lane codex post-tool-use",
+            "timeoutSec": 10,
+            "statusMessage": "Capturing useful tool outcome"
+          }
+        ]
+      }
+    ]
+  }
+}
