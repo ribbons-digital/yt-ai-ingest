@@ -97,6 +97,8 @@ This ensures the AI agent can see content from the **entire video duration**, no
 - `prepare --enhanced-scout` runs the same `ingest → scout → summarize` workflow, passing `enhanced: true` only to scout. Transcript-only or missing-video runs still skip all scout work.
 - `scout --enhanced` keeps normal scout outputs and adds `frames/scout/temporal/`, `analysis/temporal-manifest.json`, and `analysis/temporal-context.md`.
 - Enhanced temporal blocks use integer-second frame groups planned by `buildTemporalPlan()`, normally `[center-1, center, center+1, center+2]` shifted into the video range. This is local `ffmpeg` evidence, not native video-token model understanding.
+- Enhanced scout is most useful for UI bug recordings, frontend/game demos, trailers, animation, motion graphics, chart animations, editing examples, and visual tutorials with sparse transcripts. It adds less value for talking-head commentary, podcasts, or static slide lectures.
+- For regular-vs-enhanced evals, prepare the same URL into separate output roots, e.g. `ytai prepare "URL" --out-dir /tmp/ytai-eval-regular` and `ytai prepare "URL" --enhanced-scout --out-dir /tmp/ytai-eval-enhanced`, then compare source provenance, `visual-context.md`, `temporal-context.md`, contact sheets, and strips.
 - `--resume` does a dry-run ingest to determine the folder path, reads `ingest-status.json`, then calls `resumeIngest()` to fill missing assets.
 - Every ingest run writes `ingest-status.json` for resume tracking.
 

@@ -98,6 +98,12 @@ ytai prepare "YOUTUBE_URL" --enhanced-scout
 This keeps the same one-command workflow but adds ordered temporal frame groups
 around each scout moment before `summarize` writes the final context.
 
+Enhanced scout is most useful when key evidence lives between frames: UI bug
+reproductions, game/frontend demos, animation, motion graphics, trailers,
+editing examples, chart animations, or visual tutorials with sparse transcript
+coverage. It usually adds less value for talking-head commentary, podcasts, or
+static slide lectures where the transcript already carries most of the meaning.
+
 ## Transcript Handling
 
 `ytai` always extracts the full transcript (`.vtt` / `.srt`) during ingest. When `summarize` generates `analysis/summary-input.md`, the transcript section works as follows:
@@ -147,6 +153,9 @@ analysis/
   summary-input.md              # includes timestamped transcript chunks
   visual-context.md             # (after scout)
   scout-manifest.json           # (after scout)
+  temporal-context.md           # (after enhanced scout)
+  temporal-manifest.json        # (after enhanced scout)
+frames/scout/temporal/          # ordered temporal frame groups (after enhanced scout)
 ```
 
 Some assets depend on what YouTube and `yt-dlp` can provide for the source video.
@@ -228,6 +237,19 @@ frame before, one at the moment, and two after. The strip image is horizontal
 and should be read left-to-right as temporal progression. This is local
 `ffmpeg` evidence for agents that can inspect images; it does not reproduce
 native video-token model understanding.
+
+To compare regular and enhanced scout quality, prepare the same URL into two
+separate folders:
+
+```bash
+ytai prepare "YOUTUBE_URL" --out-dir /tmp/ytai-eval-regular
+ytai prepare "YOUTUBE_URL" --enhanced-scout --out-dir /tmp/ytai-eval-enhanced
+```
+
+Use questions that depend on visual sequence, such as what changed step by
+step, where a UI bug happened, how an animation transitioned, or what motion
+should be recreated. Regular scout shows isolated visual states; enhanced scout
+adds short before/during/after strips around each sampled state.
 
 ## AI Context Files
 

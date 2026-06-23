@@ -1,11 +1,23 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MEMORY_LANE_HOOK_DEBUG=1 memory-lane codex session-start",
+            "timeoutSec": 10,
+            "statusMessage": "Loading baseline memory"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "memory-lane codex user-prompt-submit",
+            "command": "MEMORY_LANE_HOOK_DEBUG=1 memory-lane codex user-prompt-submit",
             "timeoutSec": 10,
             "statusMessage": "Retrieving relevant memory"
           }
@@ -17,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "memory-lane codex stop",
+            "command": "MEMORY_LANE_HOOK_DEBUG=1 memory-lane codex stop",
             "timeoutSec": 10,
             "statusMessage": "Saving useful memory"
           }
@@ -30,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "memory-lane codex post-tool-use",
+            "command": "MEMORY_LANE_HOOK_DEBUG=1 memory-lane codex post-tool-use",
             "timeoutSec": 10,
             "statusMessage": "Capturing useful tool outcome"
           }
