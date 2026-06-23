@@ -24,6 +24,7 @@ ytai prepare "YOUTUBE_URL" --transcript-only
 ytai prepare "YOUTUBE_URL" --rate-limit
 ytai prepare "YOUTUBE_URL" --cookies-from-browser chrome
 ytai prepare "YOUTUBE_URL" --resume
+ytai prepare "YOUTUBE_URL" --enhanced-scout
 ytai prepare "YOUTUBE_URL" --scout-interval 30 --scout-columns 5
 ytai ingest "YOUTUBE_URL"
 ytai ingest "YOUTUBE_URL" --transcript-only
@@ -37,6 +38,7 @@ ytai frames ./videos/video-folder --around 12:30
 ytai frames ./videos/video-folder --around 12:30 --window 20 --fps 2
 ytai scout ./videos/video-folder
 ytai scout ./videos/video-folder --interval 30 --columns 5
+ytai scout ./videos/video-folder --enhanced
 ytai summarize ./videos/video-folder
 ytai ask ./videos/video-folder "What are the key implementation steps?"
 ```
@@ -85,6 +87,16 @@ contact sheet:
 ```bash
 ytai prepare "YOUTUBE_URL" --scout-interval 30 --scout-columns 5
 ```
+
+For screen recordings, UI demos, animation, editing analysis, or other videos
+where motion and timing matter, enable enhanced temporal scout:
+
+```bash
+ytai prepare "YOUTUBE_URL" --enhanced-scout
+```
+
+This keeps the same one-command workflow but adds ordered temporal frame groups
+around each scout moment before `summarize` writes the final context.
 
 ## Transcript Handling
 
@@ -193,6 +205,30 @@ Use a shorter interval for chart-heavy videos or UI demos:
 ytai scout ./videos/my-video --interval 30 --columns 5
 ```
 
+Enhanced scout is opt-in:
+
+```bash
+ytai scout ./videos/my-video --enhanced
+```
+
+It keeps the normal scout outputs and also writes short temporal frame groups:
+
+```text
+frames/scout/temporal/block_0001/frame_0001.jpg
+frames/scout/temporal/block_0001/frame_0002.jpg
+frames/scout/temporal/block_0001/frame_0003.jpg
+frames/scout/temporal/block_0001/frame_0004.jpg
+frames/scout/temporal/block_0001/strip.jpg
+analysis/temporal-manifest.json
+analysis/temporal-context.md
+```
+
+Each block uses integer-second frames around a scout timestamp, usually one
+frame before, one at the moment, and two after. The strip image is horizontal
+and should be read left-to-right as temporal progression. This is local
+`ffmpeg` evidence for agents that can inspect images; it does not reproduce
+native video-token model understanding.
+
 ## AI Context Files
 
 `ytai summarize` and `ytai ask` do not call an AI provider yet. They create local prompt inputs:
@@ -208,6 +244,10 @@ If `analysis/visual-context.md` or `analysis/scout-manifest.json` exists, the
 generated prompt also includes those visual scouting artifacts so agents can
 inspect sampled frames and contact sheets alongside the transcript.
 
+If enhanced scout artifacts exist, the generated prompt also includes
+`analysis/temporal-context.md` and `analysis/temporal-manifest.json` so agents
+can inspect ordered frame groups for motion, timing, transitions, and UI flow.
+
 ## Prompting an AI Agent
 
 When asking an AI agent to analyze a prepared video folder, point it at the
@@ -220,6 +260,8 @@ Please analyze this ytai video folder and produce a detailed, evidence-based sum
 Start with analysis/summary-input.md. Then inspect analysis/visual-context.md,
 frames/scout/contact_sheet.jpg, and any relevant individual images in
 frames/scout/. Use transcript.srt or transcript.vtt for timestamped evidence.
+If present, also inspect analysis/temporal-context.md and frames/scout/temporal/
+for ordered frame groups.
 Pay special attention to visual material such as charts, slides, diagrams,
 screenshots, UI demos, and text shown on screen.
 

@@ -32,6 +32,7 @@ type PrepareOptions = RunOptions & {
   cookiesFromBrowser?: string;
   cookiesPath?: string;
   resume?: boolean;
+  enhancedScout?: boolean;
 };
 
 export async function prepare(url: string, options: PrepareOptions): Promise<string> {
@@ -105,13 +106,18 @@ async function runScoutPhase(
     verbose: options.verbose,
     quiet: true,
     interval: options.scoutInterval,
-    columns: options.scoutColumns
+    columns: options.scoutColumns,
+    enhanced: options.enhancedScout
   });
   scoutSpinner.succeed("Visual scout complete");
 
   if (!options.quiet) {
     success("Frames", `${videoFolder}/frames/scout`);
     success("Contact sheet", `${videoFolder}/frames/scout/contact_sheet.jpg`);
+    if (options.enhancedScout) {
+      success("Temporal context", `${videoFolder}/analysis/temporal-context.md`);
+      success("Temporal blocks", `${videoFolder}/frames/scout/temporal`);
+    }
   }
 }
 

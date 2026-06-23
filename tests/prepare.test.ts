@@ -73,7 +73,45 @@ describe("prepare", () => {
     // Scout step is shown (even if skipped)
     expect(output).toContain("Scout");
     // No video-related ffmpeg commands should appear for scout
-    expect(output).not.toContain("--ss");
+    expect(output).not.toContain("-ss");
     expect(output).not.toContain("frame_");
+  });
+
+  it("with --enhanced-scout plans temporal scout frames in dry-run", async () => {
+    const outDir = await mkdtemp(path.join(os.tmpdir(), "ytai-prepare-"));
+
+    await prepare("https://youtube.example/watch?v=test", {
+      dryRun: true,
+      outDir,
+      scoutInterval: 30,
+      scoutColumns: 3,
+      enhancedScout: true
+    });
+
+    const output = logs.join("\n");
+    expect(output).toContain("-ss");
+    expect(output).toContain("frames/scout/temporal/block_0001/frame_0001.jpg");
+    expect(output).toContain("frames/scout/temporal/block_0001/strip.jpg");
+    expect(output).toContain("Temporal context");
+    expect(output).toContain("Temporal blocks");
+  });
+
+  it("with --transcript-only and --enhanced-scout skips all scout output", async () => {
+    const outDir = await mkdtemp(path.join(os.tmpdir(), "ytai-prepare-"));
+
+    await prepare("https://youtube.example/watch?v=test", {
+      dryRun: true,
+      outDir,
+      scoutInterval: 30,
+      scoutColumns: 3,
+      transcriptOnly: true,
+      enhancedScout: true
+    });
+
+    const output = logs.join("\n");
+    expect(output).toContain("--skip-download");
+    expect(output).not.toContain("-ss");
+    expect(output).not.toContain("frame_");
+    expect(output).not.toContain("Temporal blocks");
   });
 });

@@ -11,6 +11,8 @@ describe("preparedFolderAgentPrompt", () => {
 
     expect(prompt).toContain("analysis/summary-input.md");
     expect(prompt).toContain("analysis/visual-context.md");
+    expect(prompt).toContain("If present, also inspect analysis/temporal-context.md");
+    expect(prompt).toContain("frames/scout/temporal/");
     expect(prompt).toContain("frames/scout/contact_sheet.jpg");
     expect(prompt).toContain("transcript.srt or transcript.vtt");
     expect(prompt).toContain("Video folder: /tmp/video-folder");

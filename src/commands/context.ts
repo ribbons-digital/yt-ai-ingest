@@ -61,8 +61,10 @@ type ContextAssets = {
   description?: string;
   transcriptRaw?: string;
   visualContext?: string;
+  temporalContext?: string;
   manifests: string[];
   scoutManifests: string[];
+  temporalManifest?: string;
 };
 
 async function loadContextAssets(videoFolder: string): Promise<ContextAssets> {
@@ -72,8 +74,12 @@ async function loadContextAssets(videoFolder: string): Promise<ContextAssets> {
     description: await readOptional(path.join(videoFolder, "description.txt")),
     transcriptRaw: await readTranscript(videoFolder),
     visualContext: await readOptional(path.join(videoFolder, "analysis", "visual-context.md")),
+    temporalContext: await readOptional(path.join(videoFolder, "analysis", "temporal-context.md")),
     manifests: allFiles.filter((file) => file.endsWith("frames_manifest.json")),
-    scoutManifests: allFiles.filter((file) => file.endsWith("scout-manifest.json"))
+    scoutManifests: allFiles.filter((file) => file.endsWith("scout-manifest.json")),
+    temporalManifest: (await pathExists(path.join(videoFolder, "analysis", "temporal-manifest.json")))
+      ? path.join(videoFolder, "analysis", "temporal-manifest.json")
+      : undefined
   };
 }
 
@@ -94,8 +100,10 @@ function logLoadedAssets(assets: ContextAssets, options: ContextOptions): void {
     `Loaded transcript: ${Boolean(assets.transcriptRaw)} (${assets.transcriptRaw?.length ?? 0} chars)`
   );
   console.error(`Loaded visual context: ${Boolean(assets.visualContext)}`);
+  console.error(`Loaded temporal context: ${Boolean(assets.temporalContext)}`);
   console.error(`Found frame manifests: ${assets.manifests.length}`);
   console.error(`Found scout manifests: ${assets.scoutManifests.length}`);
+  console.error(`Found temporal manifest: ${Boolean(assets.temporalManifest)}`);
 }
 
 function renderContext(
@@ -113,7 +121,9 @@ function renderContext(
       description: Boolean(assets.description),
       transcript: Boolean(assets.transcriptRaw),
       visualContext: Boolean(assets.visualContext),
-      scoutManifests: assets.scoutManifests.length
+      scoutManifests: assets.scoutManifests.length,
+      temporalContext: Boolean(assets.temporalContext),
+      temporalManifest: Boolean(assets.temporalManifest)
     }),
     "",
     renderTaskSection(question),
@@ -139,6 +149,10 @@ function renderContext(
     "",
     assets.visualContext ? assets.visualContext.trim() : "_No analysis/visual-context.md found._",
     "",
+    ...renderOptionalSection(
+      "Temporal Context",
+      assets.temporalContext ? assets.temporalContext.trim() : undefined
+    ),
     "## Frame Manifests",
     "",
     renderManifestList(videoFolder, assets.manifests, "_No frames_manifest.json files found._"),
@@ -146,6 +160,10 @@ function renderContext(
     "## Scout Manifests",
     "",
     renderManifestList(videoFolder, assets.scoutManifests, "_No scout-manifest.json files found._"),
+    ...renderOptionalSection(
+      "Temporal Manifests",
+      assets.temporalManifest ? `- ${path.relative(videoFolder, assets.temporalManifest)}` : undefined
+    ),
     ""
   ].join("\n");
 }
@@ -168,6 +186,10 @@ function renderManifestList(videoFolder: string, manifests: string[], fallback: 
   return manifests.length > 0
     ? manifests.map((manifest) => `- ${path.relative(videoFolder, manifest)}`).join("\n")
     : fallback;
+}
+
+function renderOptionalSection(title: string, body: string | undefined): string[] {
+  return body ? [`## ${title}`, "", body, ""] : [];
 }
 
 /**
@@ -211,6 +233,8 @@ type ProvenanceInputs = {
   transcript: boolean;
   visualContext: boolean;
   scoutManifests: number;
+  temporalContext: boolean;
+  temporalManifest: boolean;
 };
 
 function buildProvenance(inputs: ProvenanceInputs): string {
@@ -236,6 +260,22 @@ function buildAvailabilityRows(inputs: ProvenanceInputs): string[] {
       "Visual scout",
       "available (contact sheet + frame samples)",
       "not available (no video downloaded or scout not run)"
+    ),
+    ...buildEnhancedTemporalRows(inputs)
+  ];
+}
+
+function buildEnhancedTemporalRows(inputs: ProvenanceInputs): string[] {
+  if (!inputs.temporalContext && !inputs.temporalManifest) {
+    return [];
+  }
+
+  return [
+    availabilityRow(
+      true,
+      "Enhanced temporal scout",
+      "available (ordered temporal frame groups)",
+      "not available"
     )
   ];
 }

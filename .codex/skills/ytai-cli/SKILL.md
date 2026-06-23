@@ -21,13 +21,13 @@ Use this skill when changing the `ytai` TypeScript CLI in this repository.
 - `src/cli.ts`: `commander` routing and user-facing flags.
 - `src/commands/ingest.ts`: yt-dlp integration, `IngestResult`/`IngestedAssets`, `IngestStatus`, error classification (`classifyYtDlpError`), `buildYtDlpArgs`, `normalizeArtifacts`, `writeIngestStatus`, `resumeIngest`.
 - `src/commands/prepare.ts`: orchestrates `ingest → scout → summarize`; handles `--resume` by reading `ingest-status.json`.
-- `src/commands/scout.ts`: visual frame sampling and contact sheet generation.
+- `src/commands/scout.ts`: visual frame sampling, contact sheet generation, and opt-in enhanced temporal frame groups.
 - `src/commands/context.ts`: `summarize` (writes `analysis/summary-input.md` with source provenance) and `ask` (writes `analysis/qna-context.md`).
 - `src/commands/clip.ts`: timestamp-based clip extraction via yt-dlp.
 - `src/commands/frames.ts`: frame extraction with `select`, `seek`, `auto` modes.
 - `src/lib/timestamps.ts`: timestamp and range parsing.
 - `src/lib/frameMode.ts`: `select`, `seek`, and `auto` frame-mode choice.
-- `src/lib/scoutPlan.ts`: automatic visual-scout timeline planning.
+- `src/lib/scoutPlan.ts`: automatic visual-scout timeline planning and enhanced temporal block planning.
 - `src/lib/process.ts`: safe `spawn` wrapper and dry-run command rendering.
 - `src/lib/ui.ts`: shared CLI output helpers for colors, symbols, spinners, and `skip()`.
 - `src/lib/agentPrompt.ts`: `preparedFolderAgentPrompt` and `degradedFolderAgentPrompt` for text-only analysis.
@@ -56,6 +56,8 @@ Read `references/cli-behavior.md` when changing command behavior or output struc
 | `--cookies-from-browser` | ingest, prepare, resume | Pass browser cookies to yt-dlp for authentication |
 | `--cookies` | ingest, prepare, resume | Pass cookies.txt path to yt-dlp |
 | `--resume` | prepare | Resume partial ingest — reads `ingest-status.json`, fills gaps |
+| `--enhanced-scout` | prepare | During scout, also create ordered temporal frame groups before summarize |
+| `--enhanced` | scout | Create ordered temporal frame groups around each scout moment |
 
 ## Transcript Chunking
 
@@ -92,6 +94,9 @@ This ensures the AI agent can see content from the **entire video duration**, no
 - Default video downloads are capped to the best MP4 stream at or below 1080p, falling back to the highest available stream when the source is below 1080p.
 - Non-verbose yt-dlp downloads keep raw output captured but parse `[download]` percentage lines to render a `cli-progress` progress bar.
 - `prepare()` conditionally runs scout (needs video) and summarize (needs any text). Uses `skip()` for skipped steps.
+- `prepare --enhanced-scout` runs the same `ingest → scout → summarize` workflow, passing `enhanced: true` only to scout. Transcript-only or missing-video runs still skip all scout work.
+- `scout --enhanced` keeps normal scout outputs and adds `frames/scout/temporal/`, `analysis/temporal-manifest.json`, and `analysis/temporal-context.md`.
+- Enhanced temporal blocks use integer-second frame groups planned by `buildTemporalPlan()`, normally `[center-1, center, center+1, center+2]` shifted into the video range. This is local `ffmpeg` evidence, not native video-token model understanding.
 - `--resume` does a dry-run ingest to determine the folder path, reads `ingest-status.json`, then calls `resumeIngest()` to fill missing assets.
 - Every ingest run writes `ingest-status.json` for resume tracking.
 

@@ -57,6 +57,7 @@ program
   .option("--out-dir <dir>", "base output directory", "videos")
   .option("--scout-interval <seconds>", "seconds between sampled scout frames", parsePositiveInteger, 60)
   .option("--scout-columns <number>", "contact sheet columns", parsePositiveInteger, 4)
+  .option("--enhanced-scout", "also create temporal frame groups during scout")
   .option("--transcript-only", "skip video download, only fetch transcript, description, and metadata")
   .option("--rate-limit", "add delays between requests to avoid YouTube rate limits")
   .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
@@ -74,6 +75,7 @@ program
         cookiesFromBrowser?: string;
         cookies?: string;
         resume?: boolean;
+        enhancedScout?: boolean;
       }
     ) => {
       await runCli(() =>
@@ -86,7 +88,8 @@ program
           rateLimit: options.rateLimit,
           cookiesFromBrowser: options.cookiesFromBrowser,
           cookiesPath: options.cookies,
-          resume: options.resume
+          resume: options.resume,
+          enhancedScout: options.enhancedScout
         })
       );
     }
@@ -181,6 +184,7 @@ program
   .option("--interval <seconds>", "seconds between sampled frames", parsePositiveInteger, 60)
   .option("--out <dir>", "output directory for scout frames")
   .option("--columns <number>", "contact sheet columns", parsePositiveInteger, 4)
+  .option("--enhanced", "also create temporal frame groups around each scout moment")
   .action(
     async (
       videoFolder: string,
@@ -188,6 +192,7 @@ program
         interval: number;
         out?: string;
         columns: number;
+        enhanced?: boolean;
       }
     ) => {
       await runCli(() => scout(videoFolder, { ...globalOptions(), ...options }));

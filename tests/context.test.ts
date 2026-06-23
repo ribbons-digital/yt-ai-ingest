@@ -50,6 +50,33 @@ describe("summarize", () => {
     expect(output).toContain("✅ **Description**");
     expect(output).toContain("✅ **Metadata**");
     expect(output).toContain("✅ **Visual scout**");
+    expect(output).not.toContain("Enhanced temporal scout");
+  });
+
+  it("includes enhanced temporal context when it exists", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-context-"));
+    await mkdir(path.join(videoFolder, "analysis"), { recursive: true });
+    await writeFile(path.join(videoFolder, "metadata.info.json"), '{"title":"Demo"}', "utf8");
+    await writeFile(path.join(videoFolder, "transcript.srt"), "00:00:01 demo transcript", "utf8");
+    await writeFile(
+      path.join(videoFolder, "analysis", "temporal-context.md"),
+      "# Enhanced Temporal Scout Context\n\n- 00:00:01: frames/scout/temporal/block_0001/strip.jpg\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(videoFolder, "analysis", "temporal-manifest.json"),
+      '{"blocks":[]}',
+      "utf8"
+    );
+
+    await summarize(videoFolder);
+
+    const output = await readFile(path.join(videoFolder, "analysis", "summary-input.md"), "utf8");
+    expect(output).toContain("✅ **Enhanced temporal scout**");
+    expect(output).toContain("## Temporal Context");
+    expect(output).toContain("frames/scout/temporal/block_0001/strip.jpg");
+    expect(output).toContain("## Temporal Manifests");
+    expect(output).toContain("analysis/temporal-manifest.json");
   });
 
   it("warns in provenance when transcript is missing", async () => {

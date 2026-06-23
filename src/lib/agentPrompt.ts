@@ -8,6 +8,8 @@ export function preparedFolderAgentPrompt(videoFolder: string): string {
     "Start with analysis/summary-input.md. Then inspect analysis/visual-context.md,",
     "frames/scout/contact_sheet.jpg, and any relevant individual images in",
     "frames/scout/. Use transcript.srt or transcript.vtt for timestamped evidence.",
+    "If present, also inspect analysis/temporal-context.md and frames/scout/temporal/",
+    "for ordered frame groups.",
     "Pay special attention to visual material such as charts, slides, diagrams,",
     "screenshots, UI demos, and text shown on screen.",
     "",
