@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { classifyYtDlpError } from "../src/commands/ingest.js";
+import {
+  classifyYtDlpError,
+  formatPartialDownloadWarning
+} from "../src/commands/ingest.js";
 
 describe("classifyYtDlpError", () => {
   it("classifies HTTP 429 rate limit", () => {
@@ -40,10 +43,32 @@ describe("classifyYtDlpError", () => {
     expect(info.suggestion).toContain("--rate-limit");
   });
 
+  it("classifies HTTP 403 forbidden media downloads", () => {
+    const info = classifyYtDlpError("ERROR: unable to download video data: HTTP Error 403: Forbidden", 1);
+    expect(info.category).toBe("forbidden");
+    expect(info.message).toContain("403");
+    expect(info.suggestion).toContain("browser cookies");
+  });
+
   it("classifies unknown errors with exit code", () => {
     const info = classifyYtDlpError("Some weird error", 42);
     expect(info.category).toBe("unknown");
     expect(info.message).toContain("42");
     expect(info.suggestion).toContain("retry");
+  });
+});
+
+describe("formatPartialDownloadWarning", () => {
+  it("includes the classified error and cookie-specific retry guidance", () => {
+    const warning = formatPartialDownloadWarning({
+      exitCode: 1,
+      partialAssetsLabel: "metadata, subtitles",
+      stderr: "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+      cookiesFromBrowser: "chrome"
+    });
+
+    expect(warning).toContain("partial assets found (metadata, subtitles)");
+    expect(warning).toContain("Media request forbidden (HTTP 403)");
+    expect(warning).toContain("Retry without --cookies-from-browser chrome");
   });
 });

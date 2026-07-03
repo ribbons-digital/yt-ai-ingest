@@ -115,22 +115,28 @@ static slide lectures where the transcript already carries most of the meaning.
 
 This ensures the AI agent can see content from the **full video**, not just the opening minutes. Each chunk includes a time range (e.g., `10:00 → 15:00`) and the raw transcript text for that period — critical for investment analysis where stock targets and risk management often appear in the latter half.
 
-## Anti-429 Options
+## Partial Download Recovery
 
-When YouTube rate-limits downloads (HTTP 429), use these flags:
+When YouTube blocks or rate-limits media downloads, `ytai` may still continue
+with transcript, metadata, description, and thumbnail assets. The warning and
+`ingest-status.json` include the classified `yt-dlp` cause plus the suggested
+next retry step.
 
 ```bash
-# Slow down requests
+# HTTP 429 / rate limit: slow down requests
 ytai prepare "URL" --rate-limit
 
-# Use authenticated cookies (biggest 429 reduction)
+# Login-required / age-restricted videos: use authenticated cookies
 ytai prepare "URL" --cookies-from-browser chrome
+
+# HTTP 403 after using browser cookies on a public video: retry without cookies
+ytai prepare "URL" --resume
+ytai resume ./videos/partial-folder
 
 # Skip video entirely — only fetch transcript and metadata
 ytai prepare "URL" --transcript-only
 
-# Resume a partial ingest (only fills missing assets)
-ytai prepare "URL" --resume
+# Resume a partial ingest with cookies when authentication is required
 ytai resume ./videos/partial-folder --cookies-from-browser chrome
 ```
 
@@ -139,7 +145,7 @@ ytai resume ./videos/partial-folder --cookies-from-browser chrome
 `ytai ingest` writes to `videos/YYYY-MM-DD_video-title_videoid/`:
 
 ```text
-source.mp4                      # video (may be missing on rate-limit)
+source.mp4                      # video (may be missing on partial download)
 audio.wav                       # extracted audio (only if video exists)
 transcript.vtt                  # full YouTube transcript
 transcript.srt                  # converted transcript

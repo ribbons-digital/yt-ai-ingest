@@ -61,6 +61,7 @@ const DEFAULT_VIDEO_FORMAT =
 
 type YtDlpErrorCategory =
   | "rate_limit"
+  | "forbidden"
   | "video_unavailable"
   | "age_restricted"
   | "geo_blocked"
@@ -82,6 +83,13 @@ export function classifyYtDlpError(stderr: string, exitCode: number): YtDlpError
       category: "rate_limit",
       message: "YouTube rate limit (HTTP 429)",
       suggestion: "Try --cookies-from-browser chrome to authenticate with YouTube, or --rate-limit to slow requests"
+    };
+  }
+  if (stderr.includes("HTTP Error 403") || stderr.includes("403 Forbidden") || stderr.includes("http error 403")) {
+    return {
+      category: "forbidden",
+      message: "Media request forbidden (HTTP 403)",
+      suggestion: "If this is a public video and you used browser cookies, retry without browser cookies. Otherwise retry later or with a fresh logged-in browser session"
     };
   }
   if (stderr.includes("Video unavailable") || stderr.includes("HTTP Error 404") || stderr.includes("http error 404")) {
@@ -192,6 +200,31 @@ export function parseYtDlpDownloadProgress(line: string): number | undefined {
     return undefined;
   }
   return Number(match[1]);
+}
+
+export function formatPartialDownloadWarning({
+  exitCode,
+  partialAssetsLabel,
+  stderr,
+  cookiesFromBrowser,
+  cookiesPath
+}: {
+  exitCode: number;
+  partialAssetsLabel: string;
+  stderr: string;
+  cookiesFromBrowser?: string;
+  cookiesPath?: string;
+}): string {
+  const errorInfo = classifyYtDlpError(stderr, exitCode);
+  const retry = retrySuggestionForPartialFailure(errorInfo, {
+    cookiesFromBrowser,
+    cookiesPath
+  });
+  return [
+    `yt-dlp exited with code ${exitCode} but partial assets found (${partialAssetsLabel}) — continuing.`,
+    `Cause: ${errorInfo.message}.`,
+    `Suggested next step: ${retry}`
+  ].join(" ");
 }
 
 export async function ingest(url: string, options: IngestOptions): Promise<IngestResult> {
@@ -339,10 +372,15 @@ async function handleDownloadFailure(
 
   const partialAssets = await detectPartialYtDlpAssets(videoFolder, options);
   if (partialAssets.hasSomeAssets) {
-    warn("Partial download", partialAssets.label);
-    warnings.push(
-      `yt-dlp exited with code ${downloadResult.code} but partial assets found (${partialAssets.label}) — continuing`
-    );
+    const warning = formatPartialDownloadWarning({
+      exitCode: downloadResult.code,
+      partialAssetsLabel: partialAssets.label,
+      stderr: downloadResult.stderr,
+      cookiesFromBrowser: options.cookiesFromBrowser,
+      cookiesPath: options.cookiesPath
+    });
+    warn("Partial download", warning);
+    warnings.push(warning);
     return;
   }
 
@@ -475,7 +513,7 @@ export async function resumeIngest(videoFolder: string, options: IngestOptions):
     success: "Resume download complete",
     failure: "Resume download failed"
   });
-  handleResumeDownloadWarning(downloadResult, warnings);
+  handleResumeDownloadWarning(downloadResult, options, warnings);
 
   if (options.dryRun) {
     return dryRunResumeResult(videoFolder, warnings);
@@ -528,12 +566,22 @@ async function ensureResumeDependencies(options: IngestOptions): Promise<void> {
   }
 }
 
-function handleResumeDownloadWarning(downloadResult: RunResult, warnings: string[]): void {
+function handleResumeDownloadWarning(
+  downloadResult: RunResult,
+  options: IngestOptions,
+  warnings: string[]
+): void {
   if (downloadResult.code === 0) {
     return;
   }
-  warnings.push(`yt-dlp exited with code ${downloadResult.code} during resume`);
   const errorInfo = classifyYtDlpError(downloadResult.stderr, downloadResult.code);
+  const retry = retrySuggestionForPartialFailure(errorInfo, {
+    cookiesFromBrowser: options.cookiesFromBrowser,
+    cookiesPath: options.cookiesPath
+  });
+  warnings.push(
+    `yt-dlp exited with code ${downloadResult.code} during resume. Cause: ${errorInfo.message}. Suggested next step: ${retry}`
+  );
   warn("Resume download warning", errorInfo.message);
 }
 
@@ -554,6 +602,19 @@ function dryRunResumeResult(videoFolder: string, warnings: string[]): IngestResu
 
 function shouldShowProgress(options: IngestOptions): boolean {
   return !options.dryRun && !options.verbose && (!options.quiet || options.showProgress === true);
+}
+
+function retrySuggestionForPartialFailure(
+  errorInfo: YtDlpErrorInfo,
+  options: Pick<IngestOptions, "cookiesFromBrowser" | "cookiesPath">
+): string {
+  if (errorInfo.category === "forbidden" && options.cookiesFromBrowser) {
+    return `Retry without --cookies-from-browser ${options.cookiesFromBrowser}; public videos can fail when YouTube returns cookie-bound media URLs.`;
+  }
+  if (errorInfo.category === "forbidden" && options.cookiesPath) {
+    return "Retry without --cookies, or refresh the cookies file from a logged-in browser session.";
+  }
+  return errorInfo.suggestion;
 }
 
 async function resolveVideoFolder(defaultFolder: string, options: IngestOptions): Promise<string> {

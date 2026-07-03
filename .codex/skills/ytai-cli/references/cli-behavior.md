@@ -26,6 +26,12 @@ Default command output is concise: external `yt-dlp` and `ffmpeg` output is
 captured unless `--verbose` is set. `ytai prepare` owns grouped output for its
 three steps and suppresses nested command success messages.
 
+When `yt-dlp` exits non-zero but leaves partial assets, `ytai` continues if
+metadata, subtitles, or video are usable. The warning stored in
+`ingest-status.json` should include the classified cause and a concrete retry
+step, such as retrying without browser cookies after an HTTP 403 on a public
+video.
+
 After successful `prepare`, print an agent prompt that tells the user to analyze
 the full video folder using `analysis/summary-input.md`, visual scout artifacts,
 individual scout frames, and timestamped transcripts. After standalone `ingest`,
