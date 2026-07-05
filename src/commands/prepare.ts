@@ -2,6 +2,7 @@ import { summarize } from "./context.js";
 import {
   ingest,
   readIngestStatus,
+  resolveResumeIngestFolder,
   resumeIngest,
   type IngestResult
 } from "./ingest.js";
@@ -178,14 +179,9 @@ function printPrepareDone(
 }
 
 async function runResumePhase(url: string, options: PrepareOptions): Promise<IngestResult> {
-  // First ingest with dry-run to determine the folder path without actual downloads
-  const dryResult = await ingest(url, {
-    ...options,
-    dryRun: true,
-    quiet: true
-  });
+  const videoFolder = await resolveResumeIngestFolder(url, options);
 
-  const status = await readIngestStatus(dryResult.videoFolder);
+  const status = await readIngestStatus(videoFolder);
   if (!status) {
     if (!options.quiet) {
       info("No previous ingest found", "running full ingest instead");
@@ -193,15 +189,16 @@ async function runResumePhase(url: string, options: PrepareOptions): Promise<Ing
     return await ingest(url, {
       ...options,
       quiet: true,
-      showProgress: true
+      showProgress: true,
+      promptVideoFolder: async () => videoFolder
     });
   }
 
   if (!options.quiet) {
-    success("Resuming ingest", dryResult.videoFolder);
+    success("Resuming ingest", videoFolder);
   }
 
-  return await resumeIngest(dryResult.videoFolder, {
+  return await resumeIngest(videoFolder, {
     ...options,
     quiet: true
   });

@@ -1,8 +1,22 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { detectFinalAssets, matchSidecarSubtitle } from "../src/commands/ingestLocal.js";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/lib/dependencies.js", () => ({
+  ensureDependencies: vi.fn()
+}));
+
+vi.mock("../src/lib/process.js", async () => {
+  const actual = await vi.importActual("../src/lib/process.js") as typeof import("../src/lib/process.js");
+  return {
+    ...actual,
+    runCommand: vi.fn()
+  };
+});
+
+import { detectFinalAssets, ingestLocal, matchSidecarSubtitle } from "../src/commands/ingestLocal.js";
+import { runCommand } from "../src/lib/process.js";
 
 describe("matchSidecarSubtitle", () => {
   it("prefers an exact-stem .srt over an exact-stem .vtt", () => {
@@ -50,6 +64,34 @@ describe("matchSidecarSubtitle", () => {
 
   it("matches case-insensitively while preserving the original candidate name", () => {
     expect(matchSidecarSubtitle("My Talk", ["My Talk.SRT"])).toBe("My Talk.SRT");
+  });
+});
+
+describe("ingestLocal", () => {
+  it("does not delete the source when importing in place with --link", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-local-in-place-"));
+    const source = path.join(videoFolder, "source.mp4");
+    await writeFile(source, "video", "utf8");
+
+    vi.mocked(runCommand).mockResolvedValue({
+      stdout: JSON.stringify({
+        format: { duration: "12" },
+        streams: [{ codec_type: "video", width: 1920, height: 1080 }]
+      }),
+      stderr: "",
+      code: 0
+    });
+
+    const result = await ingestLocal(source, {
+      dryRun: false,
+      outDir: path.dirname(videoFolder),
+      promptVideoFolder: async () => videoFolder,
+      link: true,
+      quiet: true
+    });
+
+    expect(result.videoFolder).toBe(videoFolder);
+    expect(await readFile(source, "utf8")).toBe("video");
   });
 });
 

@@ -289,6 +289,11 @@ async function importSourceVideo(
       enabled: !options.verbose && (!options.quiet || options.showProgress === true)
     });
     try {
+      if (path.resolve(absolutePath) === path.resolve(destination)) {
+        spinner.succeed("Local video already in target folder");
+        return destination;
+      }
+
       let linked = false;
       if (options.link) {
         try {

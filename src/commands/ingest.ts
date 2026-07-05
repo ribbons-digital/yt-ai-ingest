@@ -1,5 +1,5 @@
 import { input as promptInput } from "@inquirer/prompts";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { stdin as input, stdout as output } from "node:process";
 import path from "node:path";
@@ -150,6 +150,29 @@ export function classifyYtDlpError(stderr: string, exitCode: number): YtDlpError
 
 export function ingestStatusPath(videoFolder: string): string {
   return path.join(videoFolder, "ingest-status.json");
+}
+
+export async function resolveResumeIngestFolder(url: string, options: IngestOptions): Promise<string> {
+  if (classifySourceInput(url) === "local") {
+    const dryResult = await ingest(url, {
+      ...options,
+      dryRun: true,
+      quiet: true
+    });
+    return dryResult.videoFolder;
+  }
+
+  const metadata = await readVideoMetadataWithSpinner(url, {
+    ...options,
+    dryRun: false
+  });
+  const defaultVideoFolder = path.join(options.outDir, folderNameForMetadata(metadata));
+  const existingFolder = await findExistingYoutubeIngestFolder(url, metadata, options.outDir);
+  if (existingFolder) {
+    return existingFolder;
+  }
+
+  return await resolveVideoFolder(defaultVideoFolder, options);
 }
 
 export function buildYtDlpArgs(url: string, videoFolder: string, options: IngestOptions): string[] {
@@ -541,11 +564,47 @@ export async function readIngestStatus(videoFolder: string): Promise<IngestStatu
   }
   try {
     const parsed = JSON.parse(await readFile(filePath, "utf8")) as IngestStatus;
-    // Status files written before local ingest existed have no source field.
     return { ...parsed, source: parsed.source ?? { type: "youtube", url: parsed.url } };
   } catch {
     return undefined;
   }
+}
+
+async function findExistingYoutubeIngestFolder(
+  url: string,
+  metadata: YtDlpMetadata,
+  outDir: string
+): Promise<string | undefined> {
+  const entries = await readdir(outDir, { withFileTypes: true }).catch(() => []);
+  const folders = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(outDir, entry.name))
+    .sort()
+    .reverse();
+  const idSuffix = metadata.id ? `_${safeSlug(metadata.id)}` : undefined;
+
+  for (const folder of folders) {
+    const status = await readIngestStatus(folder);
+    if (status?.source.type === "youtube" && (status.source.url === url || status.url === url)) {
+      return folder;
+    }
+  }
+
+  if (!idSuffix) {
+    return undefined;
+  }
+
+  for (const folder of folders) {
+    if (!path.basename(folder).endsWith(idSuffix)) {
+      continue;
+    }
+    const status = await readIngestStatus(folder);
+    if (status?.source.type === "youtube") {
+      return folder;
+    }
+  }
+
+  return undefined;
 }
 
 export async function resumeIngest(videoFolder: string, options: IngestOptions): Promise<IngestResult> {
@@ -760,11 +819,15 @@ export async function normalizeArtifacts(
   const vtt = await findFirstFile(videoFolder, (name) => /^source\..*\.vtt$/i.test(name));
   if (await copyIfExists(vtt, path.join(videoFolder, "transcript.vtt"))) {
     assets.transcript = true;
-    await runCommand(
-      "ffmpeg",
-      ["-y", "-i", path.join(videoFolder, "transcript.vtt"), path.join(videoFolder, "transcript.srt")],
-      { ...options, allowFailure: true }
-    );
+    try {
+      await runCommand(
+        "ffmpeg",
+        ["-y", "-i", path.join(videoFolder, "transcript.vtt"), path.join(videoFolder, "transcript.srt")],
+        { ...options, allowFailure: true }
+      );
+    } catch {
+      warn("Transcript conversion failed", "keeping transcript.vtt");
+    }
   }
 
   const sourceVideo = await findFirstFile(videoFolder, (name) =>
