@@ -49,7 +49,7 @@ Read `references/cli-behavior.md` when changing command behavior or output struc
 | `IngestResult` | `ingest.ts` | Return type: `{ videoFolder, assets: IngestedAssets, warnings }` |
 | `IngestedAssets` | `ingest.ts` | Asset map: metadata, description, transcript, video, audio, thumbnail |
 | `IngestStatus` | `ingest.ts` | Written to `ingest-status.json`: URL, timestamp, assets, warnings |
-| `IngestOptions` | `ingest.ts` | Options: `transcriptOnly`, `rateLimit`, `cookiesFromBrowser`, `cookiesPath`, `resume` |
+| `IngestOptions` | `ingest.ts` | Options: `transcriptOnly`, `rateLimit`, `cookiesFromBrowser`, `cookiesPath`, `resume`, `link`, `transcribe`, `whisperModel`, `language` |
 | `YtDlpErrorCategory` | `ingest.ts` | Enum: rate_limit, video_unavailable, age_restricted, geo_blocked, no_formats, network_error, unknown |
 | `YtDlpErrorInfo` | `ingest.ts` | Classified error: `{ category, message, suggestion }` |
 | `IngestSource` | `ingest.ts` | Provenance in `ingest-status.json`: `{ type: "youtube" \| "local", url?, originalPath? }`; legacy files without it default to youtube |
@@ -59,24 +59,37 @@ Read `references/cli-behavior.md` when changing command behavior or output struc
 | `LearningProgress` / `LessonProgressEntry` | `learning.ts` | `learning/progress.json` (`version` stays 1): per-topic lesson status (`pending`/`done`), lesson file path, `completedAt`, plus additive optional `scores: QuizScore[]` and `nextReviewAt`; files written before quizzes existed stay valid |
 | `QuizScore` | `learning.ts` | One recorded quiz result: `{ date, score }` with `score` an integer 0-100 |
 | `ReviewDueEntry` / `ReviewState` | `learning.ts` | Review queue from `reviewState()`: `due` entries `{ id, nextReviewAt, lastScore }` sorted most overdue first, plus `unquizzed` done-topic ids in teaching order |
-| `concepts.json` | `learning/` output | LLM-written persistent concept scaffold from `plan-input.md`: acronyms, libraries, methods, metrics, tools, and prerequisite concepts needed for durable lessons |
+| `ConceptsFile` / `Concept` | `learning.ts` | `learning/concepts.json` schema v1: kebab-case `id`, required `term`, `type`, `plainDefinition`, `whyItMatters`, and `neededForTopics`; optional extra fields such as `confusions` may be present in the JSON |
 
 ## CLI Flags
 
 | Flag | Commands | Purpose |
 |------|----------|---------|
+| `--out-dir` | ingest, prepare, clip | Set the base output directory for ingests/prepares or the clip output directory |
 | `--transcript-only` | ingest, prepare | Skip video download — only fetch transcript/description/metadata |
 | `--rate-limit` | ingest, prepare, resume | Inject yt-dlp sleep/retry flags to avoid 429 errors |
 | `--cookies-from-browser` | ingest, prepare, resume | Pass browser cookies to yt-dlp for authentication |
 | `--cookies` | ingest, prepare, resume | Pass cookies.txt path to yt-dlp |
 | `--resume` | prepare | Resume partial ingest — reads `ingest-status.json`, fills gaps |
+| `--scout-interval` | prepare | Seconds between sampled scout frames |
+| `--scout-columns` | prepare | Contact sheet columns for the prepare scout phase |
 | `--enhanced-scout` | prepare | During scout, also create ordered temporal frame groups before summarize |
+| `--interval` | scout | Seconds between sampled scout frames |
+| `--columns` | scout | Contact sheet columns |
+| `--out` | scout, frames | Output directory for scout frames or extracted frames |
 | `--enhanced` | scout | Create ordered temporal frame groups around each scout moment |
 | `--link` | ingest, prepare | Hardlink a local source video instead of copying; falls back to copy when hardlinks fail |
 | `--transcribe` | ingest, prepare | After ingest, transcribe `audio.wav` locally with whisper when no transcript exists |
 | `--whisper-model` | ingest, prepare, transcribe | Whisper model name for local transcription |
 | `--language` | ingest, prepare, transcribe | Spoken language code for local transcription |
 | `--force` | transcribe | Transcribe again even if a transcript already exists |
+| `--from` / `--to` | clip | Required clip start and end timestamps |
+| `--force-keyframes` | clip | Re-encode cuts for more precise local clips or pass yt-dlp keyframe cutting for URLs |
+| `--around` | frames | Extract frames around one timestamp |
+| `--window` | frames | Seconds before and after `--around` |
+| `--range` | frames | Timestamp range; can be repeated |
+| `--fps` | frames | Frames per second for extraction |
+| `--mode` | frames | Frame extraction mode: `select`, `seek`, or `auto` |
 | `--next` | teach | Pick the next unfinished topic in teaching order |
 | `--due` | quiz | Quiz the most overdue due topic, else the first done-but-never-quizzed one; bare `ytai quiz` behaves the same |
 | `--json` | learn | Print machine-readable status JSON only |

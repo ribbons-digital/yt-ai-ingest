@@ -14,6 +14,9 @@ pnpm link --global
 
 Prerequisites:
 
+- Node.js 20 or newer.
+- `yt-dlp` and `ffmpeg` available on `PATH`.
+
 ```bash
 brew install yt-dlp ffmpeg
 ```
@@ -25,6 +28,7 @@ ytai prepare "YOUTUBE_URL"
 ytai prepare "YOUTUBE_URL" --transcript-only
 ytai prepare "YOUTUBE_URL" --rate-limit
 ytai prepare "YOUTUBE_URL" --cookies-from-browser chrome
+ytai prepare "YOUTUBE_URL" --cookies ./cookies.txt
 ytai prepare "YOUTUBE_URL" --resume
 ytai prepare "YOUTUBE_URL" --enhanced-scout
 ytai prepare "YOUTUBE_URL" --scout-interval 30 --scout-columns 5
@@ -35,6 +39,7 @@ ytai ingest "YOUTUBE_URL"
 ytai ingest "YOUTUBE_URL" --transcript-only
 ytai ingest "YOUTUBE_URL" --rate-limit
 ytai ingest "YOUTUBE_URL" --cookies-from-browser chrome
+ytai ingest "YOUTUBE_URL" --cookies ./cookies.txt
 ytai ingest ~/Movies/talk.mp4
 ytai resume ./videos/video-folder
 ytai resume ./videos/video-folder --rate-limit --cookies-from-browser chrome
@@ -199,7 +204,7 @@ ytai resume ./videos/partial-folder --cookies-from-browser chrome
 
 ## Output Structure
 
-`ytai ingest` writes to `videos/YYYY-MM-DD_video-title_videoid/`:
+`ytai ingest` writes to `videos/YYYY-MM-DD_video-title_videoid/` by default, or under the directory passed to `--out-dir`:
 
 ```text
 source.mp4                      # video (may be missing on partial download; local files may keep source.mov/mkv/webm)
@@ -408,6 +413,30 @@ learning/
 Validation errors include non-kebab-case or duplicate ids, invalid timestamp ranges, and prerequisites that reference unknown ids.
 Ranges ending past the video duration, `visualEvidence` paths missing from the folder, and prerequisite cycles are warnings.
 Lessons are taught in topological prerequisite order, with ties broken by importance rank and then input order; cycles never block ordering.
+
+`learning/concepts.json` uses schema version 1:
+
+```json
+{
+  "version": 1,
+  "concepts": [
+    {
+      "id": "kebab-case-unique",
+      "term": "SFT",
+      "type": "acronym | library | method | metric | tool | background",
+      "plainDefinition": "Beginner-friendly definition in 1-3 sentences.",
+      "whyItMatters": "Why this concept matters for understanding the video.",
+      "neededForTopics": ["topic-id"],
+      "confusions": ["Common misconception to prevent."]
+    }
+  ]
+}
+```
+
+`id`, `term`, `type`, `plainDefinition`, `whyItMatters`, and `neededForTopics` are required.
+`neededForTopics` must only reference topic ids from `topics.json`; `confusions` is optional.
+Validation errors include invalid JSON, a missing version, duplicate or non-kebab ids, missing required strings, non-array `neededForTopics`, and unknown topic references.
+Core topics with no concept coverage are warnings.
 
 A worked session:
 

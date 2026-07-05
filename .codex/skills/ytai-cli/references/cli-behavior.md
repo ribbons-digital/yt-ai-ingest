@@ -1,7 +1,7 @@
 # ytai CLI Behavior
 
 `ytai ingest` accepts a YouTube URL or a local video file path; any source that does not start with `http://` or `https://` is treated as a local file.
-It creates `videos/YYYY-MM-DD_safe-title_videoid/` and attempts to produce:
+It creates `videos/YYYY-MM-DD_safe-title_videoid/` by default, or the same folder shape under `--out-dir`, and attempts to produce:
 
 - `source.mp4`
 - `audio.wav`
