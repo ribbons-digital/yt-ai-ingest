@@ -154,6 +154,12 @@ export function ingestStatusPath(videoFolder: string): string {
 
 export async function resolveResumeIngestFolder(url: string, options: IngestOptions): Promise<string> {
   if (classifySourceInput(url) === "local") {
+    const absolutePath = path.resolve(url);
+    const existingFolder = await findExistingLocalIngestFolder(absolutePath, options.outDir);
+    if (existingFolder) {
+      return existingFolder;
+    }
+
     const dryResult = await ingest(url, {
       ...options,
       dryRun: true,
@@ -575,12 +581,7 @@ async function findExistingYoutubeIngestFolder(
   metadata: YtDlpMetadata,
   outDir: string
 ): Promise<string | undefined> {
-  const entries = await readdir(outDir, { withFileTypes: true }).catch(() => []);
-  const folders = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(outDir, entry.name))
-    .sort()
-    .reverse();
+  const folders = await listIngestFolders(outDir);
   const idSuffix = metadata.id ? `_${safeSlug(metadata.id)}` : undefined;
 
   for (const folder of folders) {
@@ -605,6 +606,29 @@ async function findExistingYoutubeIngestFolder(
   }
 
   return undefined;
+}
+
+async function findExistingLocalIngestFolder(
+  absolutePath: string,
+  outDir: string
+): Promise<string | undefined> {
+  const folders = await listIngestFolders(outDir);
+  for (const folder of folders) {
+    const status = await readIngestStatus(folder);
+    if (status?.source.type === "local" && status.source.originalPath === absolutePath) {
+      return folder;
+    }
+  }
+  return undefined;
+}
+
+async function listIngestFolders(outDir: string): Promise<string[]> {
+  const entries = await readdir(outDir, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(outDir, entry.name))
+    .sort()
+    .reverse();
 }
 
 export async function resumeIngest(videoFolder: string, options: IngestOptions): Promise<IngestResult> {
@@ -757,12 +781,21 @@ async function promptForVideoFolder(defaultFolder: string): Promise<string | und
   });
 }
 
-async function readVideoMetadata(url: string, options: RunOptions): Promise<YtDlpMetadata> {
+async function readVideoMetadata(url: string, options: IngestOptions): Promise<YtDlpMetadata> {
   if (options.dryRun) {
     return { id: "dry-run", title: "youtube-video" };
   }
 
-  const result = await runCommand("yt-dlp", ["--dump-json", "--no-playlist", url], {
+  const args = ["--dump-json", "--no-playlist"];
+  if (options.cookiesFromBrowser) {
+    args.push("--cookies-from-browser", options.cookiesFromBrowser);
+  }
+  if (options.cookiesPath) {
+    args.push("--cookies", options.cookiesPath);
+  }
+  args.push(url);
+
+  const result = await runCommand("yt-dlp", args, {
     capture: true,
     verbose: options.verbose
   });

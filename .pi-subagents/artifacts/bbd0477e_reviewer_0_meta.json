@@ -1,0 +1,38 @@
+{
+  "runId": "bbd0477e",
+  "agent": "reviewer",
+  "task": "[Read from: /Users/shiang/.no-mistakes/worktrees/2448e17095b9/01KWT7GYTYPT2JP9ZKWSF9MKZT/plan.md, /Users/shiang/.no-mistakes/worktrees/2448e17095b9/01KWT7GYTYPT2JP9ZKWSF9MKZT/progress.md]\n\nReview the current worktree diff against base tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904 for introduced correctness/security/performance/error-handling issues. Do not run tests and do not edit files. Focus on material findings only, anchored to file/line. Be aware previous findings about prepare resume, ingestLocal same-source hardlink deletion, and transcript-only ffmpeg were reportedly fixed, so don't repeat unless still materially present.",
+  "exitCode": 1,
+  "usage": {
+    "input": 0,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 4
+  },
+  "model": "opencode-go/deepseek-v4-pro:high",
+  "attemptedModels": [
+    "opencode-go/deepseek-v4-pro:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode-go/deepseek-v4-pro:high",
+      "success": false,
+      "exitCode": 1,
+      "error": "500: {\"type\":\"error\",\"message\":\"Internal server error\"}",
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 4
+      }
+    }
+  ],
+  "durationMs": 18416,
+  "toolCount": 0,
+  "error": "500: {\"type\":\"error\",\"message\":\"Internal server error\"}",
+  "timestamp": 1783292501292
+}

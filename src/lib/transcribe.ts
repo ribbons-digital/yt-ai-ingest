@@ -1,7 +1,7 @@
 import path from "node:path";
 import { moveIfExists, pathExists } from "./files.js";
 import { runCommand, type RunOptions } from "./process.js";
-import { startSpinner } from "./ui.js";
+import { startSpinner, warn } from "./ui.js";
 
 export type WhisperBackend = "mlx_whisper" | "whisper";
 
@@ -108,8 +108,12 @@ export async function transcribeAudio(
   if (!(await moveIfExists(producedSrt, transcriptSrt))) {
     throw new Error(`${backend} finished but did not produce ${producedSrt}.`);
   }
-  await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], {
-    ...options,
-    allowFailure: true
-  });
+  try {
+    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], {
+      ...options,
+      allowFailure: true
+    });
+  } catch {
+    warn("Transcript conversion failed", "keeping transcript.srt");
+  }
 }
