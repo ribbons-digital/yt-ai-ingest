@@ -251,7 +251,9 @@ export function validateTopicsFile(
           : "tangent",
         timestamps: isStringArray(raw.timestamps) ? raw.timestamps : [],
         summary: typeof raw.summary === "string" ? raw.summary : "",
-        prerequisites: isStringArray(raw.prerequisites) ? raw.prerequisites : undefined
+        claims: isStringArray(raw.claims) ? raw.claims : undefined,
+        prerequisites: isStringArray(raw.prerequisites) ? raw.prerequisites : undefined,
+        visualEvidence: isStringArray(raw.visualEvidence) ? raw.visualEvidence : undefined
       });
     }
   });
