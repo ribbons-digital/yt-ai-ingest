@@ -4,8 +4,11 @@ import { ask, summarize } from "./commands/context.js";
 import { clip } from "./commands/clip.js";
 import { frames } from "./commands/frames.js";
 import { ingest, resumeIngest } from "./commands/ingest.js";
+import { learnStatus, plan, recordScore, teach, topics } from "./commands/learn.js";
+import { quiz } from "./commands/quiz.js";
 import { prepare } from "./commands/prepare.js";
 import { scout } from "./commands/scout.js";
+import { transcribe } from "./commands/transcribe.js";
 import type { RequestedFrameMode } from "./lib/frameMode.js";
 
 const program = new Command();
@@ -19,32 +22,44 @@ program
 
 program
   .command("ingest")
-  .description("Download a YouTube video into an AI-ready local asset folder")
-  .argument("<url>", "YouTube URL")
+  .description("Ingest a YouTube video or local video file into an AI-ready local asset folder")
+  .argument("<source>", "YouTube URL or local video file path")
   .option("--out-dir <dir>", "base output directory", "videos")
   .option("--transcript-only", "skip video download, only fetch transcript, description, and metadata")
   .option("--rate-limit", "add delays between requests to avoid YouTube rate limits")
   .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
   .option("--cookies <path>", "path to a cookies.txt file for authentication")
+  .option("--link", "hardlink local source video instead of copying")
+  .option("--transcribe", "transcribe audio locally with whisper when no transcript exists")
+  .option("--whisper-model <name>", "whisper model name to use with --transcribe")
+  .option("--language <code>", "spoken language code for transcription, e.g. en")
   .action(
     async (
-      url: string,
+      source: string,
       options: {
         outDir: string;
         transcriptOnly?: boolean;
         rateLimit?: boolean;
         cookiesFromBrowser?: string;
         cookies?: string;
+        link?: boolean;
+        transcribe?: boolean;
+        whisperModel?: string;
+        language?: string;
       }
     ) => {
       await runCli(() =>
-        ingest(url, {
+        ingest(source, {
           ...globalOptions(),
           outDir: options.outDir,
           transcriptOnly: options.transcriptOnly,
           rateLimit: options.rateLimit,
           cookiesFromBrowser: options.cookiesFromBrowser,
-          cookiesPath: options.cookies
+          cookiesPath: options.cookies,
+          link: options.link,
+          transcribe: options.transcribe,
+          whisperModel: options.whisperModel,
+          language: options.language
         })
       );
     }
@@ -53,7 +68,7 @@ program
 program
   .command("prepare")
   .description("Ingest, scout, and create a summary context in one local workflow")
-  .argument("<url>", "YouTube URL")
+  .argument("<source>", "YouTube URL or local video file path")
   .option("--out-dir <dir>", "base output directory", "videos")
   .option("--scout-interval <seconds>", "seconds between sampled scout frames", parsePositiveInteger, 60)
   .option("--scout-columns <number>", "contact sheet columns", parsePositiveInteger, 4)
@@ -63,9 +78,13 @@ program
   .option("--cookies-from-browser <name>", "use browser cookies for authentication (chrome, safari, firefox, etc.)")
   .option("--cookies <path>", "path to a cookies.txt file for authentication")
   .option("--resume", "resume a previous partial ingest; fill in missing assets")
+  .option("--link", "hardlink local source video instead of copying")
+  .option("--transcribe", "transcribe audio locally with whisper when no transcript exists")
+  .option("--whisper-model <name>", "whisper model name to use with --transcribe")
+  .option("--language <code>", "spoken language code for transcription, e.g. en")
   .action(
     async (
-      url: string,
+      source: string,
       options: {
         outDir: string;
         scoutInterval: number;
@@ -76,10 +95,14 @@ program
         cookies?: string;
         resume?: boolean;
         enhancedScout?: boolean;
+        link?: boolean;
+        transcribe?: boolean;
+        whisperModel?: string;
+        language?: string;
       }
     ) => {
       await runCli(() =>
-        prepare(url, {
+        prepare(source, {
           ...globalOptions(),
           outDir: options.outDir,
           scoutInterval: options.scoutInterval,
@@ -89,7 +112,11 @@ program
           cookiesFromBrowser: options.cookiesFromBrowser,
           cookiesPath: options.cookies,
           resume: options.resume,
-          enhancedScout: options.enhancedScout
+          enhancedScout: options.enhancedScout,
+          link: options.link,
+          transcribe: options.transcribe,
+          whisperModel: options.whisperModel,
+          language: options.language
         })
       );
     }
@@ -126,18 +153,41 @@ program
 
 program
   .command("clip")
-  .description("Download only a timestamp section of a YouTube video")
-  .argument("<url>", "YouTube URL")
+  .description("Clip a timestamp section of a YouTube video or local video file")
+  .argument("<source>", "YouTube URL or local video file path")
   .requiredOption("--from <timestamp>", "clip start timestamp, e.g. 03:20")
   .requiredOption("--to <timestamp>", "clip end timestamp, e.g. 05:10")
   .option("--out-dir <dir>", "clip output directory", "videos/clips")
   .option("--force-keyframes", "force keyframes at cuts for more precise but slower clips")
   .action(
     async (
-      url: string,
+      source: string,
       options: { from: string; to: string; outDir: string; forceKeyframes?: boolean }
     ) => {
-      await runCli(() => clip(url, { ...globalOptions(), ...options }));
+      await runCli(() => clip(source, { ...globalOptions(), ...options }));
+    }
+  );
+
+program
+  .command("transcribe")
+  .description("Transcribe audio.wav in an ingested video folder with a local whisper backend")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .option("--force", "transcribe again even if a transcript already exists")
+  .option("--whisper-model <name>", "whisper model name to use")
+  .option("--language <code>", "spoken language code for transcription, e.g. en")
+  .action(
+    async (
+      videoFolder: string,
+      options: { force?: boolean; whisperModel?: string; language?: string }
+    ) => {
+      await runCli(() =>
+        transcribe(videoFolder, {
+          ...globalOptions(),
+          force: options.force,
+          whisperModel: options.whisperModel,
+          language: options.language
+        })
+      );
     }
   );
 
@@ -215,6 +265,72 @@ program
   .action(async (videoFolder: string, question: string) => {
     await runCli(() => ask(videoFolder, question, globalOptions()));
   });
+
+program
+  .command("topics")
+  .description("Create a topic-extraction prompt for the learning workflow")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .action(async (videoFolder: string) => {
+    await runCli(() => topics(videoFolder, globalOptions()));
+  });
+
+program
+  .command("plan")
+  .description("Create a learning-plan prompt from a validated learning/topics.json")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .action(async (videoFolder: string) => {
+    await runCli(() => plan(videoFolder, globalOptions()));
+  });
+
+program
+  .command("teach")
+  .description("Create a lesson prompt for one topic from learning/topics.json")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .argument("[topic-id]", "topic id from learning/topics.json")
+  .option("--next", "pick the next unfinished topic in teaching order")
+  .action(async (videoFolder: string, topicId: string | undefined, options: { next?: boolean }) => {
+    await runCli(() => teach(videoFolder, topicId, { ...globalOptions(), next: options.next }));
+  });
+
+program
+  .command("quiz")
+  .description("Create a quiz prompt for a topic whose lesson is done")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .argument("[topic-id]", "topic id from learning/topics.json")
+  .option("--due", "quiz the most overdue topic, or the first unquizzed one")
+  .action(async (videoFolder: string, topicId: string | undefined, options: { due?: boolean }) => {
+    await runCli(() => quiz(videoFolder, topicId, { ...globalOptions(), due: options.due }));
+  });
+
+program
+  .command("score")
+  .description("Record a quiz score for a topic whose lesson is done")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .argument("<topic-id>", "topic id from learning/topics.json")
+  .argument("<score>", "integer score from 0 to 100")
+  .action(async (videoFolder: string, topicId: string, score: string) => {
+    await runCli(() => recordScore(videoFolder, topicId, score, globalOptions()));
+  });
+
+program
+  .command("learn")
+  .description("Show learning progress and the next step for a video folder")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .option("--json", "print machine-readable status JSON only")
+  .option("--check", "validate learning artifacts and exit 1 on errors")
+  .option("--done <topic-id>", "mark a topic's lesson as done")
+  .action(
+    async (videoFolder: string, options: { json?: boolean; check?: boolean; done?: string }) => {
+      await runCli(() =>
+        learnStatus(videoFolder, {
+          ...globalOptions(),
+          json: options.json,
+          check: options.check,
+          done: options.done
+        })
+      );
+    }
+  );
 
 await program.parseAsync();
 

@@ -28,7 +28,8 @@ describe("ingest-status", () => {
         audio: false,
         thumbnail: false
       },
-      warnings: ["yt-dlp exited with code 1 but partial assets found (metadata, subtitles)"]
+      warnings: ["yt-dlp exited with code 1 but partial assets found (metadata, subtitles)"],
+      source: { type: "youtube", url: "https://youtube.example/watch?v=test" }
     };
     await writeFile(ingestStatusPath(videoFolder), JSON.stringify(status, null, 2), "utf8");
 
@@ -60,7 +61,8 @@ describe("ingest-status", () => {
         audio: true,
         thumbnail: true
       },
-      warnings: []
+      warnings: [],
+      source: { type: "youtube", url: "https://youtube.example/watch?v=abc123" }
     };
 
     await writeFile(ingestStatusPath(videoFolder), JSON.stringify(raw, null, 2), "utf8");

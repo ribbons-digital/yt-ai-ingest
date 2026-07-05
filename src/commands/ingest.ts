@@ -1,4 +1,5 @@
 import { input as promptInput } from "@inquirer/prompts";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { stdin as input, stdout as output } from "node:process";
 import path from "node:path";
@@ -15,6 +16,8 @@ import {
 import { findSourceVideo } from "../lib/media.js";
 import { ingestedFolderAgentPrompt } from "../lib/agentPrompt.js";
 import { runCommand, type RunOptions, type RunResult } from "../lib/process.js";
+import { transcribeAudio } from "../lib/transcribe.js";
+import { ingestLocal, resumeLocalIngest } from "./ingestLocal.js";
 import { block, createDownloadProgressBar, section, startSpinner, success, warn } from "../lib/ui.js";
 
 export type IngestedAssets = {
@@ -40,7 +43,13 @@ export type IngestOptions = RunOptions & {
   rateLimit?: boolean;
   cookiesFromBrowser?: string;
   cookiesPath?: string;
+  link?: boolean;
+  transcribe?: boolean;
+  whisperModel?: string;
+  language?: string;
 };
+
+export type IngestSource = { type: "youtube" | "local"; url?: string; originalPath?: string };
 
 export type IngestStatus = {
   url: string;
@@ -48,7 +57,12 @@ export type IngestStatus = {
   timestamp: string;
   assets: IngestedAssets;
   warnings: string[];
+  source: IngestSource;
 };
+
+export function classifySourceInput(input: string): "url" | "local" {
+  return /^https?:\/\//i.test(input.trim()) ? "url" : "local";
+}
 
 type YtDlpMetadata = {
   id?: string;
@@ -228,6 +242,10 @@ export function formatPartialDownloadWarning({
 }
 
 export async function ingest(url: string, options: IngestOptions): Promise<IngestResult> {
+  if (classifySourceInput(url) === "local") {
+    return await ingestLocal(url, options);
+  }
+
   await ensureIngestDependencies(options);
 
   const videoFolder = await prepareVideoFolder(url, options);
@@ -248,12 +266,38 @@ export async function ingest(url: string, options: IngestOptions): Promise<Inges
     return dryRunIngestResult(videoFolder, options, warnings);
   }
 
-  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing local assets...");
-  await writeIngestStatus(videoFolder, url, assets, warnings);
+  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing downloaded assets...");
+  await runPostIngestTranscription(videoFolder, assets, options, warnings);
+  await writeIngestStatus(videoFolder, url, assets, warnings, { type: "youtube", url });
   assertUsableAssets(assets);
   printIngestSummary(videoFolder, assets, options);
 
   return { videoFolder, assets, warnings };
+}
+
+export async function runPostIngestTranscription(
+  videoFolder: string,
+  assets: IngestedAssets,
+  options: IngestOptions,
+  warnings: string[]
+): Promise<void> {
+  if (!options.transcribe || options.dryRun || assets.transcript || !assets.audio) {
+    return;
+  }
+  try {
+    await transcribeAudio(videoFolder, {
+      verbose: options.verbose,
+      quiet: options.quiet,
+      model: options.whisperModel,
+      language: options.language
+    });
+    assets.transcript = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const warning = `Transcription failed: ${message} Retry later with: ytai transcribe ${videoFolder}`;
+    warn("Transcription failed", message);
+    warnings.push(warning);
+  }
 }
 
 async function ensureIngestDependencies(options: IngestOptions): Promise<void> {
@@ -442,11 +486,11 @@ async function normalizeWithSpinner(
     enabled: shouldShowProgress(options)
   });
   const assets = await normalizeArtifacts(videoFolder, options);
-  spinner.succeed(label === "Normalizing local assets..." ? "Normalized local assets" : "Normalization complete");
+  spinner.succeed(label === "Normalizing downloaded assets..." ? "Normalized downloaded assets" : "Normalization complete");
   return assets;
 }
 
-function assertUsableAssets(assets: IngestedAssets): void {
+export function assertUsableAssets(assets: IngestedAssets): void {
   const canSummarize = assets.metadata || assets.description || assets.transcript;
   if (!canSummarize && !assets.video) {
     throw new Error("No usable assets were produced by yt-dlp (no video, transcript, or metadata).");
@@ -472,18 +516,20 @@ function printIngestSummary(
   block(ingestedFolderAgentPrompt(videoFolder));
 }
 
-async function writeIngestStatus(
+export async function writeIngestStatus(
   videoFolder: string,
   url: string,
   assets: IngestedAssets,
-  warnings: string[]
+  warnings: string[],
+  source: IngestSource
 ): Promise<void> {
   const status: IngestStatus = {
     url,
     videoFolder,
     timestamp: new Date().toISOString(),
     assets,
-    warnings
+    warnings,
+    source
   };
   await writeJson(ingestStatusPath(videoFolder), status);
 }
@@ -494,8 +540,9 @@ export async function readIngestStatus(videoFolder: string): Promise<IngestStatu
     return undefined;
   }
   try {
-    const { readFile } = await import("node:fs/promises");
-    return JSON.parse(await readFile(filePath, "utf8")) as IngestStatus;
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as IngestStatus;
+    // Status files written before local ingest existed have no source field.
+    return { ...parsed, source: parsed.source ?? { type: "youtube", url: parsed.url } };
   } catch {
     return undefined;
   }
@@ -503,9 +550,13 @@ export async function readIngestStatus(videoFolder: string): Promise<IngestStatu
 
 export async function resumeIngest(videoFolder: string, options: IngestOptions): Promise<IngestResult> {
   const status = await requireIngestStatus(videoFolder);
-  const warnings: string[] = [...status.warnings];
-
   printResumeSummary(videoFolder, status.assets, options);
+
+  if (status.source.type === "local") {
+    return await resumeLocalIngest(videoFolder, status, options);
+  }
+
+  const warnings: string[] = [...status.warnings];
   await ensureResumeDependencies(options);
 
   const downloadResult = await runYtDlpDownload(status.url, videoFolder, options, {
@@ -520,7 +571,8 @@ export async function resumeIngest(videoFolder: string, options: IngestOptions):
   }
 
   const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing resumed assets...");
-  await writeIngestStatus(videoFolder, status.url, assets, warnings);
+  await runPostIngestTranscription(videoFolder, assets, options, warnings);
+  await writeIngestStatus(videoFolder, status.url, assets, warnings, status.source);
 
   return { videoFolder, assets, warnings };
 }
@@ -617,7 +669,7 @@ function retrySuggestionForPartialFailure(
   return errorInfo.suggestion;
 }
 
-async function resolveVideoFolder(defaultFolder: string, options: IngestOptions): Promise<string> {
+export async function resolveVideoFolder(defaultFolder: string, options: IngestOptions): Promise<string> {
   const answer = options.promptVideoFolder
     ? await options.promptVideoFolder(defaultFolder)
     : await promptForVideoFolder(defaultFolder);

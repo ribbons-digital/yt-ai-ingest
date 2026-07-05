@@ -33,6 +33,10 @@ type PrepareOptions = RunOptions & {
   cookiesPath?: string;
   resume?: boolean;
   enhancedScout?: boolean;
+  link?: boolean;
+  transcribe?: boolean;
+  whisperModel?: string;
+  language?: string;
 };
 
 export async function prepare(url: string, options: PrepareOptions): Promise<string> {
