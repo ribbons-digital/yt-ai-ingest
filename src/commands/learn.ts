@@ -14,6 +14,7 @@ import {
   reviewState,
   toStatusJson,
   validateTopicsFile,
+  validateConceptsFile,
   validateLessonMarkdown,
   type LearnArtifacts,
   type LearningProgress,
@@ -106,10 +107,11 @@ export async function teach(
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const lessonFile = `lessons/${paddedNumber}-${topic.id}.md`;
   const excerpt = await buildTranscriptExcerpt(videoFolder, topic);
+  const lessonContext = await readLessonPromptContext(videoFolder);
 
   const inputPath = path.join(videoFolder, "learning", "lessons", `${paddedNumber}-${topic.id}-input.md`);
   await mkdir(path.dirname(inputPath), { recursive: true });
-  await writeFile(inputPath, renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder), "utf8");
+  await writeFile(inputPath, renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder, lessonContext), "utf8");
 
   if (progress.lessons[topic.id]?.status === "done") {
     warn("Topic was marked done", "resetting to pending because a new lesson prompt was generated");
@@ -147,7 +149,7 @@ export async function learnStatus(
 
   if (options.check) {
     if (!options.json) {
-      printIssues(artifacts.topicsIssues);
+      printIssues([...artifacts.topicsIssues, ...artifacts.conceptsIssues]);
       if (!artifacts.hasPlanMd) {
         warn("learning/plan.md", "missing");
       }
@@ -161,9 +163,13 @@ export async function learnStatus(
     if (!artifacts.hasTopicsJson) {
       throw new Error(`learning/topics.json not found. Run: ytai topics ${videoFolder} first.`);
     }
-    const errorCount = artifacts.topicsIssues.filter((issue) => issue.severity === "error").length;
-    if (errorCount > 0) {
-      throw new Error(`learning/topics.json has ${errorCount} validation error(s).`);
+    const topicsErrorCount = artifacts.topicsIssues.filter((issue) => issue.severity === "error").length;
+    if (topicsErrorCount > 0) {
+      throw new Error(`learning/topics.json has ${topicsErrorCount} validation error(s).`);
+    }
+    const conceptsErrorCount = artifacts.conceptsIssues.filter((issue) => issue.severity === "error").length;
+    if (conceptsErrorCount > 0) {
+      throw new Error(`learning/concepts.json has ${conceptsErrorCount} validation error(s).`);
     }
     if (!options.json) {
       success("Learning artifacts check passed", `stage: ${stage}`);
@@ -299,6 +305,35 @@ async function readTopics(videoFolder: string): Promise<TopicsReadResult> {
   };
 }
 
+type ConceptsReadResult = {
+  exists: boolean;
+  issues: ValidationIssue[];
+};
+
+async function readConcepts(videoFolder: string, topics: Topic[]): Promise<ConceptsReadResult> {
+  const conceptsPath = path.join(videoFolder, "learning", "concepts.json");
+  if (!(await pathExists(conceptsPath))) {
+    return { exists: false, issues: [] };
+  }
+
+  const raw = await readFile(conceptsPath, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      exists: true,
+      issues: [{ severity: "error", message: `learning/concepts.json is not valid JSON: ${reason}` }]
+    };
+  }
+
+  return {
+    exists: true,
+    issues: validateConceptsFile(parsed, { topics })
+  };
+}
+
 export async function requireValidTopics(
   videoFolder: string
 ): Promise<{ raw: string; topics: Topic[] }> {
@@ -343,6 +378,7 @@ async function readDurationSeconds(videoFolder: string): Promise<number | undefi
 async function collectArtifacts(videoFolder: string): Promise<LearnArtifacts> {
   const learningDir = path.join(videoFolder, "learning");
   const topicsResult = await readTopics(videoFolder);
+  const conceptsResult = await readConcepts(videoFolder, topicsResult.topics);
   const progress = await readProgress(videoFolder);
   const learningFiles = await listFilesRecursive(learningDir);
   const learningRelative = learningFiles.map((file) =>
@@ -362,10 +398,11 @@ async function collectArtifacts(videoFolder: string): Promise<LearnArtifacts> {
     topicsIssues: topicsResult.issues,
     topics: topicsResult.topics,
     lessonIssues: await collectLessonIssues(learningDir, lessonOutputs),
+    conceptsIssues: conceptsResult.issues,
     hasPlanInput: learningRelative.includes("plan-input.md"),
     hasPlanMd: learningRelative.includes("plan.md"),
     hasResourcesMd: learningRelative.includes("resources.md"),
-    hasConceptsJson: learningRelative.includes("concepts.json"),
+    hasConceptsJson: conceptsResult.exists,
     progress,
     lessonOutputs
   };
@@ -441,6 +478,17 @@ export async function buildTranscriptExcerpt(videoFolder: string, topic: Topic):
   return sections.length > 0
     ? sections.join("\n\n")
     : "_This topic declares no timestamp ranges._";
+}
+
+async function readLessonPromptContext(videoFolder: string) {
+  const learningDir = path.join(videoFolder, "learning");
+  const [teachingGuideMd, conceptsJson, resourcesMd] = await Promise.all([
+    readOptional(path.join(learningDir, "teaching-guide.md")),
+    readOptional(path.join(learningDir, "concepts.json")),
+    readOptional(path.join(learningDir, "resources.md"))
+  ]);
+
+  return { teachingGuideMd, conceptsJson, resourcesMd };
 }
 
 async function readOptional(filePath: string): Promise<string | undefined> {

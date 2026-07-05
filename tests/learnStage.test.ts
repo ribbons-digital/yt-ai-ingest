@@ -19,6 +19,7 @@ function artifacts(overrides: Partial<LearnArtifacts> = {}): LearnArtifacts {
     topicsIssues: [],
     topics: [],
     lessonIssues: [],
+    conceptsIssues: [],
     hasPlanInput: false,
     hasPlanMd: false,
     hasResourcesMd: false,
@@ -177,6 +178,38 @@ describe("computeLearnStage and nextAction", () => {
         lessons: { intro: { status: "pending", lessonFile: "lessons/01-intro.md" } }
       }
     });
+    expect(computeLearnStage(legacy)).toBe("teaching");
+  });
+
+  it("keeps new folders awaiting-plan while concepts.json has validation errors", () => {
+    const state = artifacts({
+      hasTopicsJson: true,
+      topics: [topic("intro", "core")],
+      hasPlanInput: true,
+      hasPlanMd: true,
+      hasResourcesMd: true,
+      hasConceptsJson: true,
+      conceptsIssues: [{ severity: "error", message: 'concept "bad": neededForTopics entry "missing" does not match any topic id.' }]
+    });
+
+    expect(computeLearnStage(state)).toBe("awaiting-plan");
+  });
+
+  it("does not move legacy learning folders backwards when concepts.json has validation errors", () => {
+    const legacy = artifacts({
+      hasTopicsJson: true,
+      topics: [topic("intro", "core")],
+      hasPlanInput: true,
+      hasPlanMd: true,
+      hasResourcesMd: true,
+      hasConceptsJson: true,
+      conceptsIssues: [{ severity: "error", message: 'concept "bad": neededForTopics entry "missing" does not match any topic id.' }],
+      progress: {
+        version: 1,
+        lessons: { intro: { status: "pending", lessonFile: "lessons/01-intro.md" } }
+      }
+    });
+
     expect(computeLearnStage(legacy)).toBe("teaching");
   });
 

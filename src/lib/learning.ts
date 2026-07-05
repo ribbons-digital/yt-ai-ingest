@@ -26,6 +26,20 @@ export type TopicsFile = {
   topics: Topic[];
 };
 
+export type Concept = {
+  id: string;
+  term: string;
+  type: string;
+  plainDefinition: string;
+  whyItMatters: string;
+  neededForTopics: string[];
+};
+
+export type ConceptsFile = {
+  version: 1;
+  concepts: Concept[];
+};
+
 export type QuizScore = {
   /** ISO date-time when the quiz was scored. */
   date: string;
@@ -77,6 +91,7 @@ export type LearnArtifacts = {
   topicsIssues: ValidationIssue[];
   topics: Topic[];
   lessonIssues: ValidationIssue[];
+  conceptsIssues: ValidationIssue[];
   hasPlanInput: boolean;
   hasPlanMd: boolean;
   hasResourcesMd: boolean;
@@ -102,6 +117,12 @@ export type LearnStatusJson = {
   issues: ValidationIssue[];
   review: ReviewState;
   nextAction: NextAction;
+};
+
+export type LessonPromptContext = {
+  teachingGuideMd?: string;
+  conceptsJson?: string;
+  resourcesMd?: string;
 };
 
 const KEBAB_CASE_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -241,6 +262,80 @@ export function validateTopicsFile(
 
   return issues;
 }
+
+export function validateConceptsFile(
+  value: unknown,
+  opts: { topics?: Topic[] } = {}
+): ValidationIssue[] {
+  if (!isRecord(value)) {
+    return [issueError("concepts.json must be a JSON object.")];
+  }
+
+  const issues: ValidationIssue[] = [];
+  if (value.version !== 1) {
+    issues.push(issueError(`"version" must be 1, got ${JSON.stringify(value.version)}.`));
+  }
+  if (!Array.isArray(value.concepts)) {
+    issues.push(issueError('"concepts" must be an array.'));
+    return issues;
+  }
+
+  const knownTopicIds = new Set(opts.topics?.map((topic) => topic.id) ?? []);
+  const coveredTopicIds = new Set<string>();
+  const seenIds = new Set<string>();
+
+  value.concepts.forEach((raw, index) => {
+    const label = `concepts[${index}]`;
+    if (!isRecord(raw)) {
+      issues.push(issueError(`${label} must be an object.`));
+      return;
+    }
+
+    const id = typeof raw.id === "string" && raw.id.length > 0 ? raw.id : undefined;
+    if (!id) {
+      issues.push(issueError(`${label} is missing a non-empty string "id".`));
+    } else {
+      if (!KEBAB_CASE_RE.test(id)) {
+        issues.push(
+          issueError(`${label} id "${id}" must be kebab-case (lowercase letters, digits, single dashes).`)
+        );
+      }
+      if (seenIds.has(id)) {
+        issues.push(issueError(`${label} id "${id}" is a duplicate.`));
+      }
+      seenIds.add(id);
+    }
+    const name = id ? `concept "${id}"` : label;
+
+    for (const key of ["term", "type", "plainDefinition", "whyItMatters"] as const) {
+      if (typeof raw[key] !== "string" || raw[key].trim() === "") {
+        issues.push(issueError(`${name}: "${key}" must be a non-empty string.`));
+      }
+    }
+
+    if (!isStringArray(raw.neededForTopics)) {
+      issues.push(issueError(`${name}: "neededForTopics" must be an array of topic id strings.`));
+      return;
+    }
+
+    for (const topicId of raw.neededForTopics) {
+      if (knownTopicIds.size > 0 && !knownTopicIds.has(topicId)) {
+        issues.push(issueError(`${name}: neededForTopics entry "${topicId}" does not match any topic id.`));
+        continue;
+      }
+      coveredTopicIds.add(topicId);
+    }
+  });
+
+  for (const topic of opts.topics ?? []) {
+    if (topic.importance === "core" && !coveredTopicIds.has(topic.id)) {
+      issues.push(issueWarning(`core topic "${topic.id}" has no concept coverage in concepts.json.`));
+    }
+  }
+
+  return issues;
+}
+
 const REQUIRED_LESSON_HEADINGS = [
   "## Learning goal",
   "## Prerequisites and acronyms",
@@ -361,8 +456,13 @@ export function computeLearnStage(artifacts: LearnArtifacts): LearnStage {
   if (!artifacts.hasPlanMd || !artifacts.hasResourcesMd) {
     return "awaiting-plan";
   }
-  if (!artifacts.hasConceptsJson && !hasLegacyLearningWork) {
-    return "awaiting-plan";
+  if (!hasLegacyLearningWork) {
+    if (!artifacts.hasConceptsJson) {
+      return "awaiting-plan";
+    }
+    if (artifacts.conceptsIssues.some((issue) => issue.severity === "error")) {
+      return "awaiting-plan";
+    }
   }
   const required = artifacts.topics.filter((topic) => topic.importance !== "tangent");
   const allDone = required.every(
@@ -690,7 +790,8 @@ export function renderLessonInputMd(
   topic: Topic,
   lessonNumber: number,
   transcriptExcerpt: string,
-  videoFolder: string
+  videoFolder: string,
+  context: LessonPromptContext = {}
 ): string {
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const outputFile = `learning/lessons/${paddedNumber}-${topic.id}.md`;
@@ -698,6 +799,9 @@ export function renderLessonInputMd(
     topic.visualEvidence && topic.visualEvidence.length > 0
       ? topic.visualEvidence.map((evidencePath) => `- \`${evidencePath}\``).join("\n")
       : "_No visual evidence paths recorded for this topic._";
+  const teachingGuideSection = renderTeachingGuideContext(context.teachingGuideMd);
+  const conceptCardsSection = renderConceptCardsContext(context.conceptsJson, topic.id);
+  const resourcesSection = renderResourcesContext(context.resourcesMd, topic);
 
   return [
     `# Lesson Task: ${topic.title}`,
@@ -712,10 +816,9 @@ export function renderLessonInputMd(
     "",
     `Write the lesson as Markdown to \`${outputFile}\` inside the video folder \`${videoFolder}\`.`,
     "",
-    "Before writing, read these persistent learning files when they exist:",
-    "- `learning/teaching-guide.md` for the learner experience contract.",
-    "- `learning/concepts.json` for acronyms, tools, methods, metrics, and prerequisite concepts to define.",
-    "- `learning/resources.md` for inline suggested learning.",
+    "This prompt embeds the persistent learning context available at generation time.",
+    "Use the embedded sections below instead of assuming another session can open extra files.",
+    "When a section says an artifact is absent, proceed cautiously: teach prerequisites directly, avoid unsupported resource claims, and do not fail the task solely because that artifact is missing.",
     "",
     "## Required sections (in this order)",
     "",
@@ -749,6 +852,18 @@ export function renderLessonInputMd(
     "",
     visualEvidence,
     "",
+    "## Teaching guide",
+    "",
+    teachingGuideSection,
+    "",
+    "## Concept cards for this topic",
+    "",
+    conceptCardsSection,
+    "",
+    "## Resource section for this topic",
+    "",
+    resourcesSection,
+    "",
     "## Transcript excerpt",
     "",
     transcriptExcerpt.trim(),
@@ -758,6 +873,98 @@ export function renderLessonInputMd(
     `After writing \`${outputFile}\`, run: \`ytai learn ${videoFolder}\` to validate it and get the next step.`,
     ""
   ].join("\n");
+}
+
+function renderTeachingGuideContext(teachingGuideMd: string | undefined): string {
+  const trimmed = teachingGuideMd?.trim();
+  return trimmed
+    ? trimmed
+    : "_learning/teaching-guide.md is absent. Proceed cautiously by following the quality bar in this prompt and making the lesson self-contained._";
+}
+
+function renderConceptCardsContext(conceptsJson: string | undefined, topicId: string): string {
+  const trimmed = conceptsJson?.trim();
+  if (!trimmed) {
+    return "_learning/concepts.json is absent. Proceed cautiously by defining every acronym, tool, method, metric, and prerequisite before relying on it._";
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `_learning/concepts.json could not be parsed as JSON (${reason}). Proceed cautiously by defining prerequisite terms from the topic and transcript instead._`;
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.concepts)) {
+    return "_learning/concepts.json does not contain a concepts array. Proceed cautiously by defining prerequisite terms from the topic and transcript instead._";
+  }
+
+  const matchingConcepts = parsed.concepts.filter(
+    (concept) =>
+      isRecord(concept) &&
+      Array.isArray(concept.neededForTopics) &&
+      concept.neededForTopics.includes(topicId)
+  );
+
+  if (matchingConcepts.length === 0) {
+    return `_No concept cards in learning/concepts.json declare \`neededForTopics\` containing \`${topicId}\`. Proceed cautiously by defining prerequisite terms from the topic and transcript instead._`;
+  }
+
+  return ["```json", JSON.stringify({ version: 1, concepts: matchingConcepts }, null, 2), "```"].join("\n");
+}
+
+function renderResourcesContext(resourcesMd: string | undefined, topic: Topic): string {
+  const trimmed = resourcesMd?.trim();
+  if (!trimmed) {
+    return "_learning/resources.md is absent. Proceed cautiously by suggesting only resources or next steps you can justify from the embedded topic and transcript._";
+  }
+
+  const section = findTopicResourceSection(trimmed, topic);
+  return section
+    ? section
+    : `_No matching section for \`${topic.id}\` was found in learning/resources.md. Proceed cautiously by keeping suggested learning specific and clearly marking anything inferred._`;
+}
+
+function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
+  const lines = markdown.split(/\r?\n/);
+  const topicMatchesHeading = buildTopicHeadingMatcher(topic);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[index]);
+    if (!heading) {
+      continue;
+    }
+
+    if (!topicMatchesHeading(heading[2])) {
+      continue;
+    }
+    const level = heading[1].length;
+    let end = lines.length;
+    for (let scan = index + 1; scan < lines.length; scan += 1) {
+      const nextHeading = /^(#{1,6})\s+/.exec(lines[scan]);
+      if (nextHeading && nextHeading[1].length <= level) {
+        end = scan;
+        break;
+      }
+    }
+
+    return lines.slice(index, end).join("\n").trim();
+  }
+
+  return undefined;
+}
+
+function buildTopicHeadingMatcher(topic: Topic): (heading: string) => boolean {
+  const targetPhrases = [topic.id, topic.title]
+    .map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())
+    .filter((value) => value.length > 0);
+
+  return (heading: string) => {
+    const normalizedHeading = heading.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const paddedHeading = ` ${normalizedHeading} `;
+    return targetPhrases.some((phrase) => paddedHeading.includes(` ${phrase} `));
+  };
 }
 
 export function renderQuizInputMd(
@@ -857,7 +1064,7 @@ export function renderLearnStatus(
     lines.push("", `Quiz next: ytai quiz ${artifacts.videoFolder} --due`);
   }
 
-  const issues = [...artifacts.topicsIssues, ...artifacts.lessonIssues];
+  const issues = [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues];
   if (issues.length > 0) {
     lines.push("", "Issues:");
     for (const issue of issues) {
@@ -888,7 +1095,7 @@ export function toStatusJson(
       conceptsJson: artifacts.hasConceptsJson
     },
     lessons: lessonCounts(artifacts),
-    issues: [...artifacts.topicsIssues, ...artifacts.lessonIssues],
+    issues: [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues],
     review,
     nextAction: next
   };

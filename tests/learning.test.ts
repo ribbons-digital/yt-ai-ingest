@@ -6,6 +6,7 @@ import {
   renderTeachingGuideMd,
   renderTopicsInputMd,
   validateTopicsFile,
+  validateConceptsFile,
   validateLessonMarkdown,
   type Topic,
   type ValidationIssue
@@ -26,6 +27,24 @@ function rawTopic(overrides: Record<string, unknown> = {}): Record<string, unkno
 /** Helper: wrap raw topics into a version-1 topics.json value. */
 function topicsFile(topics: unknown[]): Record<string, unknown> {
   return { version: 1, topics };
+}
+
+/** Helper: a structurally valid raw concept object, overridable per test. */
+function rawConcept(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "loss-function",
+    term: "Loss function",
+    type: "method",
+    plainDefinition: "A score that says how wrong a model prediction is.",
+    whyItMatters: "Gradient descent needs a target to reduce.",
+    neededForTopics: ["gradient-descent"],
+    ...overrides
+  };
+}
+
+/** Helper: wrap raw concepts into a version-1 concepts.json value. */
+function conceptsFile(concepts: unknown[]): Record<string, unknown> {
+  return { version: 1, concepts };
 }
 
 function errorMessages(issues: ValidationIssue[]): string[] {
@@ -241,6 +260,97 @@ describe("validateTopicsFile", () => {
   });
 });
 
+describe("validateConceptsFile", () => {
+  const topics = [topic("gradient-descent", "core"), topic("optimization", "supporting")];
+
+  it("accepts a fully populated valid file with no issues at all", () => {
+    const issues = validateConceptsFile(
+      conceptsFile([
+        rawConcept({ neededForTopics: ["gradient-descent"] }),
+        rawConcept({ id: "learning-rate", term: "Learning rate", neededForTopics: ["optimization"] })
+      ]),
+      { topics }
+    );
+
+    expect(issues).toEqual([]);
+  });
+
+  it("rejects non-object roots with a single error", () => {
+    for (const value of [null, undefined, "text", 42, [conceptsFile([rawConcept()])]]) {
+      expect(validateConceptsFile(value)).toEqual([
+        { severity: "error", message: "concepts.json must be a JSON object." }
+      ]);
+    }
+  });
+
+  it("rejects a wrong or missing version", () => {
+    expect(errorMessages(validateConceptsFile({ version: 2, concepts: [rawConcept()] }))).toContain(
+      '"version" must be 1, got 2.'
+    );
+    expect(errorMessages(validateConceptsFile({ concepts: [rawConcept()] }))).toContain(
+      '"version" must be 1, got undefined.'
+    );
+  });
+
+  it("rejects a non-array concepts field and stops validating deeper", () => {
+    const issues = validateConceptsFile({ version: 1, concepts: "not-an-array" });
+    expect(issues).toEqual([{ severity: "error", message: '"concepts" must be an array.' }]);
+  });
+
+  it("rejects a non-object concept entry", () => {
+    const issues = validateConceptsFile(conceptsFile([rawConcept(), 42]));
+    expect(errorMessages(issues)).toContain("concepts[1] must be an object.");
+  });
+
+  it("rejects missing, non-kebab-case, and duplicate ids", () => {
+    expect(errorMessages(validateConceptsFile(conceptsFile([rawConcept({ id: undefined })])))).toContain(
+      'concepts[0] is missing a non-empty string "id".'
+    );
+    expect(errorMessages(validateConceptsFile(conceptsFile([rawConcept({ id: "Bad_ID" })])))).toContain(
+      'concepts[0] id "Bad_ID" must be kebab-case (lowercase letters, digits, single dashes).'
+    );
+    expect(errorMessages(validateConceptsFile(conceptsFile([rawConcept(), rawConcept()])))).toContain(
+      'concepts[1] id "loss-function" is a duplicate.'
+    );
+  });
+
+  it("rejects missing or blank required string fields", () => {
+    for (const key of ["term", "type", "plainDefinition", "whyItMatters"] as const) {
+      const issues = validateConceptsFile(conceptsFile([rawConcept({ [key]: "   " })]));
+      expect(errorMessages(issues)).toContain(`concept "loss-function": "${key}" must be a non-empty string.`);
+    }
+  });
+
+  it("rejects neededForTopics that are not an array of strings", () => {
+    for (const neededForTopics of ["gradient-descent", [42], undefined]) {
+      const issues = validateConceptsFile(conceptsFile([rawConcept({ neededForTopics })]));
+      expect(errorMessages(issues)).toContain(
+        'concept "loss-function": "neededForTopics" must be an array of topic id strings.'
+      );
+    }
+  });
+
+  it("rejects neededForTopics entries that reference unknown topic ids", () => {
+    const issues = validateConceptsFile(conceptsFile([rawConcept({ neededForTopics: ["missing-topic"] })]), {
+      topics
+    });
+    expect(errorMessages(issues)).toContain(
+      'concept "loss-function": neededForTopics entry "missing-topic" does not match any topic id.'
+    );
+  });
+
+  it("warns when a core topic has no concept coverage", () => {
+    const issues = validateConceptsFile(conceptsFile([rawConcept({ neededForTopics: ["optimization"] })]), {
+      topics
+    });
+
+    expect(errorMessages(issues)).toEqual([]);
+    expect(warningMessages(issues)).toContain(
+      'core topic "gradient-descent" has no concept coverage in concepts.json.'
+    );
+  });
+});
+
 describe("orderTopicsForTeaching", () => {
   it("places prerequisites before dependents regardless of input order", () => {
     const ordered = orderTopicsForTeaching([
@@ -386,6 +496,44 @@ describe("renderLessonInputMd", () => {
   };
   const excerpt = "[01:00] the model attends to every token\n[01:30] weights sum to one";
   const output = renderLessonInputMd(lessonTopic, 3, `\n${excerpt}\n`, folder);
+  const contextualOutput = renderLessonInputMd(lessonTopic, 3, excerpt, folder, {
+    teachingGuideMd: "Teach with analogies before equations.",
+    conceptsJson: JSON.stringify({
+      version: 1,
+      concepts: [
+        {
+          id: "softmax",
+          term: "Softmax",
+          type: "method",
+          plainDefinition: "Turns scores into probabilities.",
+          whyItMatters: "Attention weights use softmax.",
+          neededForTopics: ["attention"],
+          confusions: ["Softmax does not pick exactly one token."]
+        },
+        {
+          id: "fft",
+          term: "FFT",
+          type: "method",
+          plainDefinition: "Computes frequency components.",
+          whyItMatters: "Useful elsewhere.",
+          neededForTopics: ["spectrograms"],
+          confusions: []
+        }
+      ]
+    }),
+    resourcesMd: [
+      "# Learning resources",
+      "",
+      "## Attention mechanisms",
+      "",
+      "- https://example.com/attention",
+      "  - Focus on attention weights.",
+      "",
+      "## Spectrograms",
+      "",
+      "- https://example.com/spectrograms"
+    ].join("\n")
+  });
 
   it("names the zero-padded lesson output path inside the video folder", () => {
     expect(output).toContain("# Lesson Task: Attention mechanisms");
@@ -414,6 +562,33 @@ describe("renderLessonInputMd", () => {
 
   it("embeds the trimmed transcript excerpt verbatim", () => {
     expect(output).toContain(excerpt);
+  });
+
+  it("embeds the teaching guide content when provided", () => {
+    expect(contextualOutput).toContain("## Teaching guide");
+    expect(contextualOutput).toContain("Teach with analogies before equations.");
+  });
+
+  it("embeds only concept cards needed for the current topic", () => {
+    expect(contextualOutput).toContain('"term": "Softmax"');
+    expect(contextualOutput).toContain('"neededForTopics": [');
+    expect(contextualOutput).toContain('"attention"');
+    expect(contextualOutput).not.toContain('"term": "FFT"');
+    expect(contextualOutput).not.toContain('"spectrograms"');
+  });
+
+  it("embeds the matching resource section for the current topic", () => {
+    expect(contextualOutput).toContain("## Resource section for this topic");
+    expect(contextualOutput).toContain("## Attention mechanisms");
+    expect(contextualOutput).toContain("https://example.com/attention");
+    expect(contextualOutput).not.toContain("https://example.com/spectrograms");
+  });
+
+  it("calls out missing persistent teaching artifacts", () => {
+    expect(output).toContain("learning/teaching-guide.md is absent");
+    expect(output).toContain("learning/concepts.json is absent");
+    expect(output).toContain("learning/resources.md is absent");
+    expect(output).toContain("Proceed cautiously");
   });
 
   it("steers the LLM away from summary-only lessons", () => {
