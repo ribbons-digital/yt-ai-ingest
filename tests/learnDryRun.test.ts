@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { learnStatus, plan, recordScore, teach, topics } from "../src/commands/learn.js";
 import { quiz } from "../src/commands/quiz.js";
 import { pathExists } from "../src/lib/files.js";
@@ -153,5 +153,23 @@ describe("learning command dry-run behavior", () => {
     await quiz(videoFolder, "core-topic", { dryRun: true });
 
     expect(await pathExists(path.join(videoFolder, "learning", "quizzes", "01-core-topic-quiz-input.md"))).toBe(false);
+  });
+
+  it("learn --check warns when a core topic lacks a resource section", async () => {
+    const videoFolder = await makeVideoFolder();
+    await writeFile(
+      path.join(videoFolder, "learning", "resources.md"),
+      ["# Learning resources", "", "## Unrelated topic", "", "- URL: https://example.com/other"].join("\n"),
+      "utf8"
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let warnings = "";
+    try {
+      await learnStatus(videoFolder, { check: true });
+      warnings = warnSpy.mock.calls.flat().join("\n");
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(warnings).toContain('core topic "core-topic" has no resource section in learning/resources.md.');
   });
 });
