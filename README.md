@@ -489,6 +489,10 @@ ytai score ./videos/2026-07-05_attention-talk_1a2b3c4d5e <topic> 85
 ytai learn ./videos/2026-07-05_attention-talk_1a2b3c4d5e --json
 ```
 
+To repair an existing lesson, run `ytai teach <folder> <topic-id> --refresh`.
+This writes a repair-oriented lesson input that embeds the current lesson and validation warnings without overwriting the lesson file.
+When the topic was marked done, generating the repair prompt resets it to pending while preserving quiz scores and review dates.
+
 At each LLM step the prompt file states the task, the exact output path, the schema or required sections, a quality bar, and the embedded evidence:
 
 - `topics-input.md` asks for 4 to 12 teachable topics as strict JSON, with every timestamp grounded in the embedded transcript and scout evidence. `ytai topics` also writes `teaching-guide.md` when it does not already exist, so reruns do not erase user or model teaching preferences.

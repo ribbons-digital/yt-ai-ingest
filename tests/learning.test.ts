@@ -671,6 +671,28 @@ describe("renderLessonInputMd", () => {
       "- Use after: The first audio preprocessing lesson."
     ].join("\n")
   });
+  const repairOutput = renderLessonInputMd(lessonTopic, 3, excerpt, folder, {
+    learnerProfileJson: JSON.stringify({
+      version: 1,
+      audienceLevel: "hands-on beginner",
+      goals: ["Skip the video while learning systematically."],
+      knownConcepts: ["vectors"],
+      doNotAssumeTerms: ["QKV"],
+      preferredDepth: "learn",
+      teachingPreferences: ["Use analogies before equations."]
+    }),
+    teachingGuideMd: "Teach with analogies before equations.",
+    resourcesMd: "# Learning resources\n\n## Attention mechanisms (`attention`)\n\n- URL: https://example.com/attention"
+  }, {
+    existingLessonFile: "lessons/03-attention.md",
+    existingLessonMd: "# Attention mechanisms\n\n## Learning goal\nOld summary-only lesson.",
+    validationIssues: [
+      {
+        severity: "warning",
+        message: 'lessons/03-attention.md: missing required heading "## Practice".'
+      }
+    ]
+  });
 
   it("names the zero-padded lesson output path inside the video folder", () => {
     expect(output).toContain("# Lesson Task: Attention mechanisms");
@@ -748,6 +770,19 @@ describe("renderLessonInputMd", () => {
     expect(output).toContain(
       "After writing `learning/lessons/03-attention.md`, run: `ytai learn videos/demo` to validate it and get the next step."
     );
+  });
+
+  it("renders a repair-oriented prompt with the existing lesson and warnings", () => {
+    expect(repairOutput).toContain("# Lesson Repair Task: Attention mechanisms");
+    expect(repairOutput).toContain("Repair the existing lesson as Markdown to `learning/lessons/03-attention.md`");
+    expect(repairOutput).toContain("## Existing lesson to repair");
+    expect(repairOutput).toContain("The current lesson was read from `learning/lessons/03-attention.md`.");
+    expect(repairOutput).toContain("`````markdown");
+    expect(repairOutput).toContain("Old summary-only lesson.");
+    expect(repairOutput).toContain("## Current validation warnings");
+    expect(repairOutput).toContain('- warning: lessons/03-attention.md: missing required heading "## Practice".');
+    expect(repairOutput).toContain("## Learner profile");
+    expect(repairOutput).toContain("## Resource section for this topic");
   });
 
   it("notes when a topic has no visual evidence", () => {

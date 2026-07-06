@@ -288,8 +288,9 @@ program
   .argument("<video-folder>", "folder created by ytai ingest")
   .argument("[topic-id]", "topic id from learning/topics.json")
   .option("--next", "pick the next unfinished topic in teaching order")
-  .action(async (videoFolder: string, topicId: string | undefined, options: { next?: boolean }) => {
-    await runCli(() => teach(videoFolder, topicId, { ...globalOptions(), next: options.next }));
+  .option("--refresh", "create a repair prompt for an existing lesson")
+  .action(async (videoFolder: string, topicId: string | undefined, options: { next?: boolean; refresh?: boolean }) => {
+    await runCli(() => teach(videoFolder, topicId, { ...globalOptions(), next: options.next, refresh: options.refresh }));
   });
 
 program

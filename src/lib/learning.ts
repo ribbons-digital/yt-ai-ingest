@@ -136,6 +136,12 @@ export type LessonPromptContext = {
   resourcesMd?: string;
 };
 
+export type LessonRepairContext = {
+  existingLessonFile: string;
+  existingLessonMd: string;
+  validationIssues: ValidationIssue[];
+};
+
 const KEBAB_CASE_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const IMPORTANCE_VALUES: readonly string[] = ["core", "supporting", "tangent"];
 const IMPORTANCE_RANK: Record<TopicImportance, number> = {
@@ -841,7 +847,8 @@ export function renderLessonInputMd(
   lessonNumber: number,
   transcriptExcerpt: string,
   videoFolder: string,
-  context: LessonPromptContext = {}
+  context: LessonPromptContext = {},
+  repair?: LessonRepairContext
 ): string {
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const outputFile = `learning/lessons/${paddedNumber}-${topic.id}.md`;
@@ -853,19 +860,24 @@ export function renderLessonInputMd(
   const teachingGuideSection = renderTeachingGuideContext(context.teachingGuideMd);
   const conceptCardsSection = renderConceptCardsContext(context.conceptsJson, topic.id);
   const resourcesSection = renderResourcesContext(context.resourcesMd, topic);
+  const repairSections = repair ? renderLessonRepairSections(repair) : [];
 
   return [
-    `# Lesson Task: ${topic.title}`,
+    repair ? `# Lesson Repair Task: ${topic.title}` : `# Lesson Task: ${topic.title}`,
     "",
     "## Role",
     "",
-    "You are a patient teacher, not a video summarizer.",
-    `You are writing lesson ${paddedNumber} about "${topic.title}" for a learner who may not have watched this video.`,
+    repair ? "You are a careful lesson repair editor, not a video summarizer." : "You are a patient teacher, not a video summarizer.",
+    repair
+      ? `You are repairing lesson ${paddedNumber} about "${topic.title}" for a learner who may not have watched this video.`
+      : `You are writing lesson ${paddedNumber} about "${topic.title}" for a learner who may not have watched this video.`,
     "The learner wants to skip the video but still build durable understanding of the topic and its prerequisites.",
     "",
     "## Task",
     "",
-    `Write the lesson as Markdown to \`${outputFile}\` inside the video folder \`${videoFolder}\`.`,
+    repair
+      ? `Repair the existing lesson as Markdown to \`${outputFile}\` inside the video folder \`${videoFolder}\`.`
+      : `Write the lesson as Markdown to \`${outputFile}\` inside the video folder \`${videoFolder}\`.`,
     "",
     "This prompt embeds the persistent learning context available at generation time.",
     "Use the embedded sections below instead of assuming another session can open extra files.",
@@ -892,6 +904,13 @@ export function renderLessonInputMd(
     "- Teach prerequisite concepts even when the video only mentions them briefly.",
     "- Practice must reinforce concepts, not send the learner hunting through the transcript.",
     "- The lesson must stand alone for a learner in a future session with a different LLM.",
+    ...(repair
+      ? [
+          "- Preserve useful correct content from the existing lesson.",
+          "- Fix every validation warning below before making optional improvements.",
+          "- Do not rewrite unrelated artifacts or delete the existing lesson file yourself."
+        ]
+      : []),
     "",
     "## Topic",
     "",
@@ -919,6 +938,7 @@ export function renderLessonInputMd(
     "",
     resourcesSection,
     "",
+    ...repairSections,
     "## Transcript excerpt",
     "",
     transcriptExcerpt.trim(),
@@ -928,6 +948,32 @@ export function renderLessonInputMd(
     `After writing \`${outputFile}\`, run: \`ytai learn ${videoFolder}\` to validate it and get the next step.`,
     ""
   ].join("\n");
+}
+
+function renderLessonRepairSections(repair: LessonRepairContext): string[] {
+  return [
+    "## Existing lesson to repair",
+    "",
+    `The current lesson was read from \`learning/${repair.existingLessonFile}\`.`,
+    "Preserve useful correct content, but rewrite any section needed to satisfy the quality bar.",
+    "",
+    "`````markdown",
+    repair.existingLessonMd.trim(),
+    "`````",
+    "",
+    "## Current validation warnings",
+    "",
+    renderLessonValidationIssues(repair.validationIssues),
+    ""
+  ];
+}
+
+function renderLessonValidationIssues(issues: ValidationIssue[]): string {
+  if (issues.length === 0) {
+    return "_No automated validation warnings. Improve the lesson against the quality bar and embedded context._";
+  }
+
+  return issues.map((issue) => `- ${issue.severity}: ${issue.message}`).join("\n");
 }
 
 function renderLearnerProfileContext(learnerProfileJson: string | undefined): string {

@@ -36,6 +36,7 @@ type LearnOptions = {
 
 type TeachOptions = LearnOptions & {
   next?: boolean;
+  refresh?: boolean;
 };
 
 type LearnStatusOptions = LearnOptions & {
@@ -104,6 +105,13 @@ export async function teach(
   topicId: string | undefined,
   options: TeachOptions = {}
 ): Promise<void> {
+  if (options.refresh && options.next) {
+    throw new Error("Use either --refresh with an explicit topic id or --next, not both.");
+  }
+  if (options.refresh && !topicId) {
+    throw new Error("Use --refresh with an explicit topic id.");
+  }
+
   const { topics: topicList } = await requireValidTopics(videoFolder);
   const ordered = orderTopicsForTeaching(topicList);
   const progress = await readProgress(videoFolder);
@@ -130,6 +138,9 @@ export async function teach(
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const lessonFile = `lessons/${paddedNumber}-${topic.id}.md`;
   const excerpt = await buildTranscriptExcerpt(videoFolder, topic);
+  const repairContext = options.refresh
+    ? await readLessonRepairContext(videoFolder, progress.lessons[topic.id]?.lessonFile ?? lessonFile)
+    : undefined;
   if (options.dryRun) {
     await previewLearnerProfileWrite(videoFolder);
   } else {
@@ -142,7 +153,11 @@ export async function teach(
     info("Dry run", `Would write ${inputPath}`);
   } else {
     await mkdir(path.dirname(inputPath), { recursive: true });
-    await writeFile(inputPath, renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder, lessonContext), "utf8");
+    await writeFile(
+      inputPath,
+      renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder, lessonContext, repairContext),
+      "utf8"
+    );
   }
 
   if (progress.lessons[topic.id]?.status === "done") {
@@ -552,6 +567,25 @@ export async function buildTranscriptExcerpt(videoFolder: string, topic: Topic):
   return sections.length > 0
     ? sections.join("\n\n")
     : "_This topic declares no timestamp ranges._";
+}
+
+async function readLessonRepairContext(
+  videoFolder: string,
+  lessonFile: string
+): Promise<{ existingLessonFile: string; existingLessonMd: string; validationIssues: ValidationIssue[] }> {
+  const lessonPath = path.join(videoFolder, "learning", lessonFile);
+  let existingLessonMd: string;
+  try {
+    existingLessonMd = await readFile(lessonPath, "utf8");
+  } catch {
+    throw new Error(`Existing lesson not found at learning/${lessonFile}. Run ytai teach without --refresh first.`);
+  }
+
+  return {
+    existingLessonFile: lessonFile,
+    existingLessonMd,
+    validationIssues: validateLessonMarkdown(existingLessonMd, lessonFile)
+  };
 }
 
 async function readLessonPromptContext(videoFolder: string) {
