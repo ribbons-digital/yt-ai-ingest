@@ -59,6 +59,7 @@ ytai topics ./videos/video-folder
 ytai plan ./videos/video-folder
 ytai teach ./videos/video-folder --next
 ytai teach ./videos/video-folder some-topic-id
+ytai teach ./videos/video-folder some-topic-id --refresh
 ytai quiz ./videos/video-folder
 ytai quiz ./videos/video-folder --due
 ytai quiz ./videos/video-folder some-topic-id
@@ -490,14 +491,15 @@ ytai learn ./videos/2026-07-05_attention-talk_1a2b3c4d5e --json
 ```
 
 To repair an existing lesson, run `ytai teach <folder> <topic-id> --refresh`.
-This writes a repair-oriented lesson input that embeds the current lesson and validation warnings without overwriting the lesson file.
+Refresh requires an explicit topic id, cannot be combined with `--next`, and errors when the existing lesson is missing.
+It writes a repair-oriented lesson input that embeds the current lesson and validation warnings without overwriting the lesson file.
 When the topic was marked done, generating the repair prompt resets it to pending while preserving quiz scores and review dates.
 
 At each LLM step the prompt file states the task, the exact output path, the schema or required sections, a quality bar, and the embedded evidence:
 
 - `topics-input.md` asks for 4 to 12 teachable topics as strict JSON, with every timestamp grounded in the embedded transcript and scout evidence. `ytai topics` also writes `teaching-guide.md` when it does not already exist, so reruns do not erase user or model teaching preferences.
 - `plan-input.md` asks for `plan.md` (stages that respect prerequisites, with depth targets and completion checks), `resources.md` (2 to 4 external resources per core topic), and `concepts.json` (acronyms, tools, methods, metrics, and prerequisite concepts needed to teach the topics well).
-- Each `lessons/<nn>-<id>-input.md` asks for one standalone lesson with fixed sections: `## Learning goal`, `## Prerequisites and acronyms`, `## Mental model`, `## What the video says`, `## Teach the concept`, `## Worked example`, `## Common confusions`, `## Suggested learning`, and `## Practice`. The prompt embeds `teaching-guide.md` when present, only concept cards from `concepts.json` whose `neededForTopics` includes the current topic id, and the matching topic section from `resources.md`; missing artifacts are called out in the prompt so the LLM proceeds cautiously instead of failing.
+- Each `lessons/<nn>-<id>-input.md` asks for one standalone lesson with fixed sections: `## Learning goal`, `## Prerequisites and acronyms`, `## Mental model`, `## What the video says`, `## Teach the concept`, `## Worked example`, `## Common confusions`, `## Suggested learning`, and `## Practice`. The prompt embeds `learner-profile.json`, `teaching-guide.md` when present, only concept cards from `concepts.json` whose `neededForTopics` includes the current topic id, and the matching topic section from `resources.md`; missing artifacts are called out in the prompt so the LLM proceeds cautiously instead of failing.
 - Each `quizzes/<nn>-<id>-quiz-input.md` asks for a concept-based oral quiz that tests definitions, distinctions, worked examples, failure modes, and application to new cases rather than transcript scavenger-hunt recall.
 Concept validation surfaces schema errors, duplicate or non-kebab ids, unknown topic references, and uncovered core topics in `ytai learn` output and `learn --json` issues.
 New folders remain in `awaiting-plan` until concept errors are fixed; legacy folders with existing lesson or progress state do not move backwards by themselves.
@@ -507,7 +509,7 @@ Lesson quality validation surfaces missing teaching sections, missing practice a
 `ytai learn <folder> --check` validates the learning artifacts and exits with code 1 on errors.
 `ytai learn <folder> --done <topic-id>` marks a topic's lesson done.
 With `--dry-run`, `topics`, `plan`, `teach`, `quiz`, `score`, and `learn --done` validate and print the file or progress update they would make without writing prompt files or changing `learning/progress.json`.
-Regenerating a lesson prompt for a completed topic resets that topic to pending while preserving its quiz scores and next review time.
+Regenerating or refreshing a lesson prompt for a completed topic resets that topic to pending while preserving its quiz scores and next review time.
 
 ### Retention: quiz and review
 
