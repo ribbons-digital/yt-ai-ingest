@@ -55,15 +55,10 @@ describe("transcribeAudio", () => {
     expect(warn).toHaveBeenCalledWith("Transcript conversion failed", "keeping transcript.srt");
   });
 
-  it("dry-run previews the detected whisper backend and matching flags", async () => {
+  it("dry-run previews whisper and ffmpeg commands without probing installed backends", async () => {
     const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-transcribe-"));
 
-    vi.mocked(runCommand).mockImplementation(async (command, args) => {
-      if (command === "mlx_whisper" && args[0] === "--help") {
-        return { stdout: "", stderr: "", code: 1 };
-      }
-      return { stdout: "", stderr: "", code: 0 };
-    });
+    vi.mocked(runCommand).mockResolvedValue({ stdout: "", stderr: "", code: 0 });
 
     await transcribeAudio(videoFolder, {
       dryRun: true,
@@ -71,27 +66,31 @@ describe("transcribeAudio", () => {
       language: "en"
     });
 
-    expect(runCommand).toHaveBeenNthCalledWith(1, "mlx_whisper", ["--help"], {
-      capture: true,
-      allowFailure: true
-    });
-    expect(runCommand).toHaveBeenNthCalledWith(2, "whisper", ["--help"], {
-      capture: true,
-      allowFailure: true
-    });
+    expect(runCommand).toHaveBeenCalledTimes(2);
     expect(runCommand).toHaveBeenNthCalledWith(
-      3,
-      "whisper",
+      1,
+      "mlx_whisper",
       [
         path.join(videoFolder, "audio.wav"),
-        "--output_dir",
+        "--output-dir",
         videoFolder,
-        "--output_format",
+        "--output-format",
         "srt",
         "--model",
         "small",
         "--language",
         "en"
+      ],
+      { dryRun: true, model: "small", language: "en" }
+    );
+    expect(runCommand).toHaveBeenNthCalledWith(
+      2,
+      "ffmpeg",
+      [
+        "-y",
+        "-i",
+        path.join(videoFolder, "transcript.srt"),
+        path.join(videoFolder, "transcript.vtt")
       ],
       { dryRun: true, model: "small", language: "en" }
     );

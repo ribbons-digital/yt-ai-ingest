@@ -88,17 +88,19 @@ export async function transcribeAudio(
     throw new Error(`No audio.wav found in ${videoFolder}. Run ytai ingest first to extract audio.`);
   }
 
+  if (options.dryRun) {
+    const backend: WhisperBackend = "mlx_whisper";
+    const args = buildWhisperArgsForBackend(backend, audioPath, videoFolder, argOptions);
+    await runCommand(backend, args, options);
+    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], options);
+    return;
+  }
+
   const backend = await detectWhisperBackend();
   if (!backend) {
     throw new Error(`No local whisper backend found. ${WHISPER_INSTALL_HINT}.`);
   }
   const args = buildWhisperArgsForBackend(backend, audioPath, videoFolder, argOptions);
-
-  if (options.dryRun) {
-    await runCommand(backend, args, options);
-    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], options);
-    return;
-  }
 
   const spinner = startSpinner("Transcribing audio locally...", {
     enabled: !options.verbose && !options.quiet
