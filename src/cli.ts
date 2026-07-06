@@ -4,7 +4,7 @@ import { ask, summarize } from "./commands/context.js";
 import { clip } from "./commands/clip.js";
 import { frames } from "./commands/frames.js";
 import { ingest, resumeIngest } from "./commands/ingest.js";
-import { learnStatus, plan, recordScore, teach, topics } from "./commands/learn.js";
+import { learnStatus, plan, recordScore, renderLesson, teach, topics } from "./commands/learn.js";
 import { quiz } from "./commands/quiz.js";
 import { prepare } from "./commands/prepare.js";
 import { scout } from "./commands/scout.js";
@@ -311,6 +311,15 @@ program
   .argument("<score>", "integer score from 0 to 100")
   .action(async (videoFolder: string, topicId: string, score: string) => {
     await runCli(() => recordScore(videoFolder, topicId, score, globalOptions()));
+  });
+
+program
+  .command("render-lesson")
+  .description("Render a completed Markdown lesson as local self-contained HTML")
+  .argument("<video-folder>", "folder created by ytai ingest")
+  .argument("<topic-id>", "topic id from learning/topics.json")
+  .action(async (videoFolder: string, topicId: string) => {
+    await runCli(() => renderLesson(videoFolder, topicId, globalOptions()));
   });
 
 program

@@ -60,6 +60,7 @@ ytai plan ./videos/video-folder
 ytai teach ./videos/video-folder --next
 ytai teach ./videos/video-folder some-topic-id
 ytai teach ./videos/video-folder some-topic-id --refresh
+ytai render-lesson ./videos/video-folder some-topic-id
 ytai quiz ./videos/video-folder
 ytai quiz ./videos/video-folder --due
 ytai quiz ./videos/video-folder some-topic-id
@@ -238,7 +239,7 @@ learning/                       # (after the learning commands, see Learning Wor
   plan.md                       # written by your LLM
   resources.md                  # written by your LLM
   progress.json                 # lesson progress and quiz scores, managed by ytai
-  lessons/                      # <nn>-<topic-id>-input.md from ytai teach, <nn>-<topic-id>.md from your LLM
+  lessons/                      # <nn>-<topic-id>-input.md from ytai teach, <nn>-<topic-id>.md from your LLM, optional <nn>-<topic-id>.html from ytai render-lesson
   quizzes/                      # <nn>-<topic-id>-quiz-input.md from ytai quiz; only the score persists, via ytai score
 ```
 
@@ -482,6 +483,7 @@ ytai plan ./videos/2026-07-05_attention-talk_1a2b3c4d5e
 ytai teach ./videos/2026-07-05_attention-talk_1a2b3c4d5e --next
 # LLM step: read learning/lessons/01-<topic>-input.md and write learning/lessons/01-<topic>.md
 ytai learn ./videos/2026-07-05_attention-talk_1a2b3c4d5e --done <topic>
+ytai render-lesson ./videos/2026-07-05_attention-talk_1a2b3c4d5e <topic>
 ytai teach ./videos/2026-07-05_attention-talk_1a2b3c4d5e --next
 # repeat teach and learn --done until ytai learn reports stage: complete
 ytai quiz ./videos/2026-07-05_attention-talk_1a2b3c4d5e --due
@@ -500,6 +502,7 @@ At each LLM step the prompt file states the task, the exact output path, the sch
 - `topics-input.md` asks for 4 to 12 teachable topics as strict JSON, with every timestamp grounded in the embedded transcript and scout evidence. `ytai topics` also writes `teaching-guide.md` when it does not already exist, so reruns do not erase user or model teaching preferences.
 - `plan-input.md` asks for `plan.md` (stages that respect prerequisites, with depth targets and completion checks), `resources.md` (2 to 4 external resources per core topic), and `concepts.json` (acronyms, tools, methods, metrics, and prerequisite concepts needed to teach the topics well).
 - Each `lessons/<nn>-<id>-input.md` asks for one standalone lesson with fixed sections: `## Learning goal`, `## Prerequisites and acronyms`, `## Mental model`, `## What the video says`, `## Teach the concept`, `## Worked example`, `## Common confusions`, `## Suggested learning`, and `## Practice`. The prompt embeds `learner-profile.json`, `teaching-guide.md` when present, only concept cards from `concepts.json` whose `neededForTopics` includes the current topic id, and the matching topic section from `resources.md`; missing artifacts are called out in the prompt so the LLM proceeds cautiously instead of failing.
+- `ytai render-lesson <folder> <topic-id>` reads the Markdown lesson and writes `learning/lessons/<nn>-<id>.html` as a self-contained local page. The Markdown remains canonical; the renderer supports a safe Markdown subset, escapes lesson content, uses native `<details>` for practice answers, renders matching `concepts.json` cards, and shows available topic timestamps and local frame evidence as thumbnails.
 - Each `quizzes/<nn>-<id>-quiz-input.md` asks for a concept-based oral quiz that tests definitions, distinctions, worked examples, failure modes, and application to new cases rather than transcript scavenger-hunt recall.
 Concept validation surfaces schema errors, duplicate or non-kebab ids, unknown topic references, and uncovered core topics in `ytai learn` output and `learn --json` issues.
 New folders remain in `awaiting-plan` until concept errors are fixed; legacy folders with existing lesson or progress state do not move backwards by themselves.
@@ -508,7 +511,7 @@ Lesson quality validation surfaces missing teaching sections, missing practice a
 `ytai learn <folder> --json` prints only `{ stage, artifacts, lessons, issues, review, nextAction }`; `nextAction.kind` is `cli` (run a command) or `llm` (write a file).
 `ytai learn <folder> --check` validates the learning artifacts and exits with code 1 on errors.
 `ytai learn <folder> --done <topic-id>` marks a topic's lesson done.
-With `--dry-run`, `topics`, `plan`, `teach`, `quiz`, `score`, and `learn --done` validate and print the file or progress update they would make without writing prompt files or changing `learning/progress.json`.
+With `--dry-run`, `topics`, `plan`, `teach`, `render-lesson`, `quiz`, `score`, and `learn --done` validate and print the file or progress update they would make without writing prompt files, HTML files, or changing `learning/progress.json`.
 Regenerating or refreshing a lesson prompt for a completed topic resets that topic to pending while preserving its quiz scores and next review time.
 
 ### Retention: quiz and review
