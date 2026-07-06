@@ -63,14 +63,20 @@ export async function quiz(
   const excerpt = await buildTranscriptExcerpt(videoFolder, topic);
 
   const outPath = path.join(videoFolder, "learning", "quizzes", `${paddedNumber}-${topic.id}-quiz-input.md`);
-  await mkdir(path.dirname(outPath), { recursive: true });
-  await writeFile(
-    outPath,
-    renderQuizInputMd(topic, lessonNumber, lessonContent, excerpt, videoFolder),
-    "utf8"
-  );
+  if (options.dryRun) {
+    if (!options.quiet) {
+      info("Dry run", `Would write ${outPath}`);
+    }
+  } else {
+    await mkdir(path.dirname(outPath), { recursive: true });
+    await writeFile(
+      outPath,
+      renderQuizInputMd(topic, lessonNumber, lessonContent, excerpt, videoFolder),
+      "utf8"
+    );
+  }
 
-  if (!options.quiet) {
+  if (!options.quiet && !options.dryRun) {
     success("Quiz prompt written", outPath);
     info(
       "Next",

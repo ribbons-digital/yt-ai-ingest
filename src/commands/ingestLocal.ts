@@ -22,10 +22,13 @@ import {
   type IngestedAssets,
   type IngestOptions,
   type IngestResult,
+  type IngestSource,
   type IngestStatus
 } from "./ingest.js";
 
 const DIRECT_CONTAINER_EXTS: Record<string, true> = { mp4: true, mov: true, mkv: true, webm: true };
+type LocalIngestStatus = IngestStatus & { source: Extract<IngestSource, { type: "local" }> };
+
 const SOURCE_VIDEO_PATTERN = /^source\.(mp4|mkv|webm|mov)$/i;
 
 type LocalVideoMetadata = {
@@ -60,9 +63,11 @@ export async function ingestLocal(filePath: string, options: IngestOptions): Pro
   ].join("_");
   const videoFolder = await resolveVideoFolder(path.join(options.outDir, folderName), options);
 
-  await ensureDir(path.join(videoFolder, "frames"));
-  await ensureDir(path.join(videoFolder, "clips"));
-  await ensureDir(path.join(videoFolder, "analysis"));
+  if (!options.dryRun) {
+    await ensureDir(path.join(videoFolder, "frames"));
+    await ensureDir(path.join(videoFolder, "clips"));
+    await ensureDir(path.join(videoFolder, "analysis"));
+  }
 
   const warnings: string[] = [];
 
@@ -103,7 +108,7 @@ export async function ingestLocal(filePath: string, options: IngestOptions): Pro
 
 export async function resumeLocalIngest(
   videoFolder: string,
-  status: IngestStatus,
+  status: LocalIngestStatus,
   options: IngestOptions
 ): Promise<IngestResult> {
   if (!options.dryRun) {

@@ -49,7 +49,9 @@ export type IngestOptions = RunOptions & {
   language?: string;
 };
 
-export type IngestSource = { type: "youtube" | "local"; url?: string; originalPath?: string };
+export type IngestSource =
+  | { type: "youtube"; url: string }
+  | { type: "local"; originalPath: string };
 
 export type IngestStatus = {
   url: string;
@@ -295,7 +297,7 @@ export async function ingest(url: string, options: IngestOptions): Promise<Inges
     return dryRunIngestResult(videoFolder, options, warnings);
   }
 
-  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing downloaded assets...");
+  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing downloaded assets...", "Normalized downloaded assets");
   await runPostIngestTranscription(videoFolder, assets, options, warnings);
   await writeIngestStatus(videoFolder, url, assets, warnings, { type: "youtube", url });
   assertUsableAssets(assets);
@@ -509,13 +511,14 @@ function dryRunIngestResult(
 async function normalizeWithSpinner(
   videoFolder: string,
   options: IngestOptions,
-  label: string
+  label: string,
+  successLabel: string
 ): Promise<IngestedAssets> {
   const spinner = startSpinner(label, {
     enabled: shouldShowProgress(options)
   });
   const assets = await normalizeArtifacts(videoFolder, options);
-  spinner.succeed(label === "Normalizing downloaded assets..." ? "Normalized downloaded assets" : "Normalization complete");
+  spinner.succeed(successLabel);
   return assets;
 }
 
@@ -636,7 +639,7 @@ export async function resumeIngest(videoFolder: string, options: IngestOptions):
   printResumeSummary(videoFolder, status.assets, options);
 
   if (status.source.type === "local") {
-    return await resumeLocalIngest(videoFolder, status, options);
+    return await resumeLocalIngest(videoFolder, { ...status, source: status.source }, options);
   }
 
   const warnings: string[] = [...status.warnings];
@@ -653,7 +656,7 @@ export async function resumeIngest(videoFolder: string, options: IngestOptions):
     return dryRunResumeResult(videoFolder, warnings);
   }
 
-  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing resumed assets...");
+  const assets = await normalizeWithSpinner(videoFolder, options, "Normalizing resumed assets...", "Normalization complete");
   await runPostIngestTranscription(videoFolder, assets, options, warnings);
   await writeIngestStatus(videoFolder, status.url, assets, warnings, status.source);
 
@@ -755,7 +758,9 @@ function retrySuggestionForPartialFailure(
 export async function resolveVideoFolder(defaultFolder: string, options: IngestOptions): Promise<string> {
   const answer = options.promptVideoFolder
     ? await options.promptVideoFolder(defaultFolder)
-    : await promptForVideoFolder(defaultFolder);
+    : options.dryRun
+      ? undefined
+      : await promptForVideoFolder(defaultFolder);
 
   return expandHomePath(answer?.trim() || defaultFolder);
 }

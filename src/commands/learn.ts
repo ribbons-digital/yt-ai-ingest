@@ -49,6 +49,17 @@ export async function topics(videoFolder: string, options: LearnOptions = {}): P
   const learningDir = path.join(videoFolder, "learning");
   const outPath = path.join(learningDir, "topics-input.md");
   const guidePath = path.join(learningDir, "teaching-guide.md");
+  if (options.dryRun) {
+    info("Dry run", `Would write ${outPath}`);
+    if (!(await pathExists(guidePath))) {
+      info("Dry run", `Would write ${guidePath}`);
+    }
+    info(
+      "Next",
+      `Have an LLM read learning/topics-input.md and write learning/topics.json, then run: ytai learn ${videoFolder}`
+    );
+    return;
+  }
   await mkdir(learningDir, { recursive: true });
   await writeFile(outPath, renderTopicsInputMd(evidence, videoFolder), "utf8");
   success("Topic extraction prompt written", outPath);
@@ -67,9 +78,13 @@ export async function topics(videoFolder: string, options: LearnOptions = {}): P
 export async function plan(videoFolder: string, options: LearnOptions = {}): Promise<void> {
   const { raw } = await requireValidTopics(videoFolder);
   const outPath = path.join(videoFolder, "learning", "plan-input.md");
-  await mkdir(path.dirname(outPath), { recursive: true });
-  await writeFile(outPath, renderPlanInputMd(raw, videoFolder), "utf8");
-  success("Plan prompt written", outPath);
+  if (options.dryRun) {
+    info("Dry run", `Would write ${outPath}`);
+  } else {
+    await mkdir(path.dirname(outPath), { recursive: true });
+    await writeFile(outPath, renderPlanInputMd(raw, videoFolder), "utf8");
+    success("Plan prompt written", outPath);
+  }
   info(
     "Next",
     `Have an LLM read learning/plan-input.md and write learning/plan.md, learning/resources.md, and learning/concepts.json, then run: ytai learn ${videoFolder}`
@@ -110,16 +125,24 @@ export async function teach(
   const lessonContext = await readLessonPromptContext(videoFolder);
 
   const inputPath = path.join(videoFolder, "learning", "lessons", `${paddedNumber}-${topic.id}-input.md`);
-  await mkdir(path.dirname(inputPath), { recursive: true });
-  await writeFile(inputPath, renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder, lessonContext), "utf8");
+  if (options.dryRun) {
+    info("Dry run", `Would write ${inputPath}`);
+  } else {
+    await mkdir(path.dirname(inputPath), { recursive: true });
+    await writeFile(inputPath, renderLessonInputMd(topic, lessonNumber, excerpt, videoFolder, lessonContext), "utf8");
+  }
 
   if (progress.lessons[topic.id]?.status === "done") {
     warn("Topic was marked done", "resetting to pending because a new lesson prompt was generated");
   }
-  progress.lessons[topic.id] = { status: "pending", lessonFile };
-  await writeProgress(videoFolder, progress);
+  if (!options.dryRun) {
+    progress.lessons[topic.id] = { ...progress.lessons[topic.id], status: "pending", lessonFile };
+    await writeProgress(videoFolder, progress);
+  }
 
-  success("Lesson prompt written", inputPath);
+  if (!options.dryRun) {
+    success("Lesson prompt written", inputPath);
+  }
   info(
     "Next",
     `Have an LLM read learning/lessons/${paddedNumber}-${topic.id}-input.md and write learning/${lessonFile}, then run: ytai learn ${videoFolder}`
@@ -212,10 +235,16 @@ export async function recordScore(
   const now = new Date();
   const scores = [...(entry.scores ?? []), { date: now.toISOString(), score }];
   const nextReviewAt = computeNextReview(scores, now);
-  progress.lessons[topicId] = { ...entry, scores, nextReviewAt };
-  await writeProgress(videoFolder, progress);
+  if (!options.dryRun) {
+    progress.lessons[topicId] = { ...entry, scores, nextReviewAt };
+    await writeProgress(videoFolder, progress);
+  }
 
-  success("Recorded quiz score", `${topicId}: ${score}/100`);
+  if (options.dryRun) {
+    info("Dry run", `Would record quiz score ${topicId}: ${score}/100`);
+  } else {
+    success("Recorded quiz score", `${topicId}: ${score}/100`);
+  }
   info("Next review", nextReviewAt);
 
   const artifacts = await collectArtifacts(videoFolder);
@@ -256,6 +285,12 @@ async function markLessonDone(
       status: "pending",
       lessonFile: `lessons/${String(lessonNumber).padStart(2, "0")}-${topicId}.md`
     };
+  }
+  if (options.dryRun) {
+    if (!options.json) {
+      info("Dry run", `Would mark lesson done: ${topicId}`);
+    }
+    return;
   }
   progress.lessons[topicId] = {
     ...entry,

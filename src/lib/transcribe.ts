@@ -61,6 +61,17 @@ export function buildWhisperArgs(
   return args;
 }
 
+function buildWhisperArgsForBackend(
+  backend: WhisperBackend,
+  audioPath: string,
+  outDir: string,
+  opts: WhisperArgOptions = {}
+): string[] {
+  return backend === "mlx_whisper"
+    ? buildMlxWhisperArgs(audioPath, outDir, opts)
+    : buildWhisperArgs(audioPath, outDir, opts);
+}
+
 export async function transcribeAudio(
   videoFolder: string,
   options: TranscribeAudioOptions
@@ -73,13 +84,7 @@ export async function transcribeAudio(
     language: options.language
   };
 
-  if (options.dryRun) {
-    await runCommand("mlx_whisper", buildMlxWhisperArgs(audioPath, videoFolder, argOptions), options);
-    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], options);
-    return;
-  }
-
-  if (!(await pathExists(audioPath))) {
+  if (!options.dryRun && !(await pathExists(audioPath))) {
     throw new Error(`No audio.wav found in ${videoFolder}. Run ytai ingest first to extract audio.`);
   }
 
@@ -87,11 +92,13 @@ export async function transcribeAudio(
   if (!backend) {
     throw new Error(`No local whisper backend found. ${WHISPER_INSTALL_HINT}.`);
   }
+  const args = buildWhisperArgsForBackend(backend, audioPath, videoFolder, argOptions);
 
-  const args =
-    backend === "mlx_whisper"
-      ? buildMlxWhisperArgs(audioPath, videoFolder, argOptions)
-      : buildWhisperArgs(audioPath, videoFolder, argOptions);
+  if (options.dryRun) {
+    await runCommand(backend, args, options);
+    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], options);
+    return;
+  }
 
   const spinner = startSpinner("Transcribing audio locally...", {
     enabled: !options.verbose && !options.quiet
@@ -109,10 +116,13 @@ export async function transcribeAudio(
     throw new Error(`${backend} finished but did not produce ${producedSrt}.`);
   }
   try {
-    await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], {
+    const conversion = await runCommand("ffmpeg", ["-y", "-i", transcriptSrt, transcriptVtt], {
       ...options,
       allowFailure: true
     });
+    if (conversion.code !== 0) {
+      warn("Transcript conversion failed", "keeping transcript.srt");
+    }
   } catch {
     warn("Transcript conversion failed", "keeping transcript.srt");
   }

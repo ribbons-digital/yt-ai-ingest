@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ProcessModule from "../src/lib/process.js";
 
 vi.mock("../src/lib/process.js", async () => {
-  const actual = await vi.importActual("../src/lib/process.js") as typeof import("../src/lib/process.js");
+  const actual = await vi.importActual<typeof ProcessModule>("../src/lib/process.js");
   return {
     ...actual,
     runCommand: vi.fn()
@@ -168,5 +170,28 @@ describe("resolveResumeIngestFolder", () => {
     ).resolves.toBe(existingFolder);
 
     expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it("falls back to dry-run local ingest when no existing local folder matches", async () => {
+    const outDir = await mkdtemp(path.join(os.tmpdir(), "ytai-resume-folder-"));
+    const sourcePath = path.join(outDir, "new-source.mp4");
+    await writeFile(sourcePath, "video", "utf8");
+    const id = createHash("sha256").update(`${sourcePath}:5`).digest("hex").slice(0, 10);
+
+    vi.mocked(runCommand).mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+
+    await expect(
+      resolveResumeIngestFolder(sourcePath, {
+        dryRun: true,
+        outDir,
+        quiet: true
+      })
+    ).resolves.toBe(path.join(outDir, `${new Date().toISOString().slice(0, 10)}_new-source_${id}`));
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "ffprobe",
+      ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", sourcePath],
+      expect.objectContaining({ dryRun: true, quiet: true })
+    );
   });
 });

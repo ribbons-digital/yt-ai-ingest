@@ -2,13 +2,14 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type * as ProcessModule from "../src/lib/process.js";
 
 vi.mock("../src/lib/dependencies.js", () => ({
   ensureDependencies: vi.fn()
 }));
 
 vi.mock("../src/lib/process.js", async () => {
-  const actual = await vi.importActual("../src/lib/process.js") as typeof import("../src/lib/process.js");
+  const actual = await vi.importActual<typeof ProcessModule>("../src/lib/process.js");
   return {
     ...actual,
     runCommand: vi.fn()
@@ -17,6 +18,7 @@ vi.mock("../src/lib/process.js", async () => {
 
 import { detectFinalAssets, ingestLocal, matchSidecarSubtitle } from "../src/commands/ingestLocal.js";
 import { runCommand } from "../src/lib/process.js";
+import { pathExists } from "../src/lib/files.js";
 
 describe("matchSidecarSubtitle", () => {
   it("prefers an exact-stem .srt over an exact-stem .vtt", () => {
@@ -92,6 +94,25 @@ describe("ingestLocal", () => {
 
     expect(result.videoFolder).toBe(videoFolder);
     expect(await readFile(source, "utf8")).toBe("video");
+  });
+
+  it("does not create output directories during dry-run", async () => {
+    const outDir = await mkdtemp(path.join(os.tmpdir(), "ytai-local-dry-run-"));
+    const source = path.join(outDir, "talk.mp4");
+    await writeFile(source, "video", "utf8");
+
+    vi.mocked(runCommand).mockResolvedValue({ stdout: "", stderr: "", code: 0 });
+
+    const result = await ingestLocal(source, {
+      dryRun: true,
+      outDir,
+      quiet: true
+    });
+
+    expect(await pathExists(result.videoFolder)).toBe(false);
+    expect(await pathExists(path.join(result.videoFolder, "frames"))).toBe(false);
+    expect(await pathExists(path.join(result.videoFolder, "clips"))).toBe(false);
+    expect(await pathExists(path.join(result.videoFolder, "analysis"))).toBe(false);
   });
 });
 

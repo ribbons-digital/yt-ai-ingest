@@ -204,7 +204,7 @@ ytai resume ./videos/partial-folder --cookies-from-browser chrome
 
 ## Output Structure
 
-`ytai ingest` writes to `videos/YYYY-MM-DD_video-title_videoid/` by default, or under the directory passed to `--out-dir`:
+`ytai ingest` writes to `videos/YYYY-MM-DD_safe-title_videoid/` by default, or under the directory passed to `--out-dir`:
 
 ```text
 source.mp4                      # video (may be missing on partial download; local files may keep source.mov/mkv/webm)

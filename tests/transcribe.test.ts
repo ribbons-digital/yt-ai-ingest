@@ -2,9 +2,11 @@ import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ProcessModule from "../src/lib/process.js";
+import type * as UiModule from "../src/lib/ui.js";
 
 vi.mock("../src/lib/process.js", async () => {
-  const actual = await vi.importActual("../src/lib/process.js") as typeof import("../src/lib/process.js");
+  const actual = await vi.importActual<typeof ProcessModule>("../src/lib/process.js");
   return {
     ...actual,
     runCommand: vi.fn()
@@ -12,7 +14,7 @@ vi.mock("../src/lib/process.js", async () => {
 });
 
 vi.mock("../src/lib/ui.js", async () => {
-  const actual = await vi.importActual("../src/lib/ui.js") as typeof import("../src/lib/ui.js");
+  const actual = await vi.importActual<typeof UiModule>("../src/lib/ui.js");
   return {
     ...actual,
     startSpinner: vi.fn(() => ({
@@ -44,6 +46,71 @@ describe("transcribeAudio", () => {
       }
       if (command === "ffmpeg") {
         throw new Error("spawn ffmpeg ENOENT");
+      }
+      return { stdout: "", stderr: "", code: 1 };
+    });
+
+    await expect(transcribeAudio(videoFolder, { quiet: true })).resolves.toBeUndefined();
+    await expect(readFile(path.join(videoFolder, "transcript.srt"), "utf8")).resolves.toBe("transcript");
+    expect(warn).toHaveBeenCalledWith("Transcript conversion failed", "keeping transcript.srt");
+  });
+
+  it("dry-run previews the detected whisper backend and matching flags", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-transcribe-"));
+
+    vi.mocked(runCommand).mockImplementation(async (command, args) => {
+      if (command === "mlx_whisper" && args[0] === "--help") {
+        return { stdout: "", stderr: "", code: 1 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    });
+
+    await transcribeAudio(videoFolder, {
+      dryRun: true,
+      model: "small",
+      language: "en"
+    });
+
+    expect(runCommand).toHaveBeenNthCalledWith(1, "mlx_whisper", ["--help"], {
+      capture: true,
+      allowFailure: true
+    });
+    expect(runCommand).toHaveBeenNthCalledWith(2, "whisper", ["--help"], {
+      capture: true,
+      allowFailure: true
+    });
+    expect(runCommand).toHaveBeenNthCalledWith(
+      3,
+      "whisper",
+      [
+        path.join(videoFolder, "audio.wav"),
+        "--output_dir",
+        videoFolder,
+        "--output_format",
+        "srt",
+        "--model",
+        "small",
+        "--language",
+        "en"
+      ],
+      { dryRun: true, model: "small", language: "en" }
+    );
+  });
+
+  it("keeps the SRT transcript when VTT conversion exits non-zero", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-transcribe-"));
+    await writeFile(path.join(videoFolder, "audio.wav"), "audio", "utf8");
+
+    vi.mocked(runCommand).mockImplementation(async (command, args) => {
+      if (command === "mlx_whisper" && args[0] === "--help") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (command === "mlx_whisper") {
+        await writeFile(path.join(videoFolder, "audio.srt"), "transcript", "utf8");
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (command === "ffmpeg") {
+        return { stdout: "", stderr: "bad conversion", code: 1 };
       }
       return { stdout: "", stderr: "", code: 1 };
     });
