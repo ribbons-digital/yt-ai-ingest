@@ -73,12 +73,16 @@ Global flags:
 
 ```bash
 ytai --dry-run frames ./videos/video-folder --around 12:30
+ytai --dry-run topics ./videos/video-folder
 ytai --verbose ingest "YOUTUBE_URL"
 ```
 
-Default output is concise and hides raw `yt-dlp` / `ffmpeg` logs behind friendly
-status lines. Use `--verbose` when you need to debug the underlying commands or
-see full tool output.
+Use `--dry-run` to preview supported external commands and non-mutating write plans.
+For `ingest` and `prepare`, dry runs skip the interactive folder prompt and use the generated default folder.
+For local ingest and learning commands, dry runs validate inputs and report the directory, prompt, or progress update that would happen without changing output files.
+
+Default output is concise and hides raw `yt-dlp` / `ffmpeg` logs behind friendly status lines.
+Use `--verbose` when you need to debug the underlying commands or see full tool output.
 
 ## Default Workflow
 
@@ -102,10 +106,10 @@ video is only available below 1080p, `ytai` uses the highest available matching
 stream. During the yt-dlp download, the CLI switches from the spinner to a
 `cli-progress` progress bar with a percentage when yt-dlp reports progress.
 
-Interactive `prepare` and `ingest` runs prompt for the final video folder before
-writing assets. Press Enter to accept the generated default, or enter a custom
-folder path. Home-relative paths such as `~/Movies/my-video` are expanded before
-any later workflow steps run.
+Interactive `prepare` and `ingest` runs prompt for the final video folder before writing assets.
+Press Enter to accept the generated default, or enter a custom folder path.
+Home-relative paths such as `~/Movies/my-video` are expanded before any later workflow steps run.
+Dry runs skip this prompt and use the generated default path.
 
 For videos with dense visual information, use a shorter scout interval or wider
 contact sheet:
@@ -162,6 +166,8 @@ ytai transcribe ./videos/video-folder --force --whisper-model small --language e
 Transcription uses the first available local whisper backend: `mlx_whisper`, then `whisper`.
 Install one with `pip install mlx-whisper` (Apple Silicon) or `pipx install openai-whisper` (other platforms).
 It reads `audio.wav`, writes `transcript.srt`, and converts it to `transcript.vtt`.
+If VTT conversion fails, `ytai` keeps `transcript.srt` and prints a warning.
+A `--dry-run` transcribe previews the `mlx_whisper` and `ffmpeg` commands without requiring `audio.wav` or probing installed backends.
 During `ingest` or `prepare`, a failed `--transcribe` degrades to a status warning with a `ytai transcribe` retry hint instead of failing the run.
 
 ## Transcript Handling
@@ -472,6 +478,8 @@ Lesson quality validation surfaces missing teaching sections, missing practice a
 `ytai learn <folder> --json` prints only `{ stage, artifacts, lessons, issues, review, nextAction }`; `nextAction.kind` is `cli` (run a command) or `llm` (write a file).
 `ytai learn <folder> --check` validates the learning artifacts and exits with code 1 on errors.
 `ytai learn <folder> --done <topic-id>` marks a topic's lesson done.
+With `--dry-run`, `topics`, `plan`, `teach`, `quiz`, `score`, and `learn --done` validate and print the file or progress update they would make without writing prompt files or changing `learning/progress.json`.
+Regenerating a lesson prompt for a completed topic resets that topic to pending while preserving its quiz scores and next review time.
 
 ### Retention: quiz and review
 
@@ -489,6 +497,7 @@ The prompt embeds the lesson verbatim when `learning/lessons/<nn>-<id>.md` exist
 It instructs the LLM to act as a strict oral examiner: ask 3 to 5 questions one at a time, never reveal an answer before the learner attempts it, grade against the video evidence citing timestamps, and announce a 0 to 100 score with its rubric.
 The conversation is the exam room: unlike the other `*-input.md` files, no LLM output file is expected, and only the final score persists.
 `ytai score <folder> <topic-id> <score>` records that score (an integer from 0 to 100, for a topic whose lesson is done), appends it to `learning/progress.json`, and prints the next review time and next action.
+With `--dry-run`, it validates the score and reports the next review time without changing `learning/progress.json`.
 
 Scheduling is simple spaced repetition: a score of 80 or higher passes.
 A pass schedules the next review `2^(n-1)` days out for a trailing streak of `n` consecutive passes (1, 2, 4, ... days), capped at 60 days.
