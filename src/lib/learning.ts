@@ -61,6 +61,15 @@ export type LearningProgress = {
   version: 1;
   lessons: Record<string, LessonProgressEntry>;
 };
+export type LearnerProfile = {
+  version: 1;
+  audienceLevel: string;
+  goals: string[];
+  knownConcepts: string[];
+  doNotAssumeTerms: string[];
+  preferredDepth: "skim" | "learn" | "master";
+  teachingPreferences: string[];
+};
 
 export type ValidationIssue = {
   severity: "error" | "warning";
@@ -120,6 +129,7 @@ export type LearnStatusJson = {
 };
 
 export type LessonPromptContext = {
+  learnerProfileJson?: string;
   teachingGuideMd?: string;
   conceptsJson?: string;
   resourcesMd?: string;
@@ -132,6 +142,26 @@ const IMPORTANCE_RANK: Record<TopicImportance, number> = {
   supporting: 1,
   tangent: 2
 };
+export function createDefaultLearnerProfile(): LearnerProfile {
+  return {
+    version: 1,
+    audienceLevel: "curious learner who may be new to the video's subject",
+    goals: [
+      "Skip watching the full video while still learning its important ideas systematically.",
+      "Build durable conceptual understanding from the video's claims, transcript evidence, and supporting explanations.",
+      "Know which prerequisites, acronyms, and terms need attention before moving on."
+    ],
+    knownConcepts: [],
+    doNotAssumeTerms: ["SFT", "TRL", "LoRA", "RL", "eval loss", "masking"],
+    preferredDepth: "learn",
+    teachingPreferences: [
+      "Explain prerequisites before using them.",
+      "Separate what the video says from background explanation.",
+      "Use concrete examples, common confusions, and practice questions with answers.",
+      "Suggest what to study next without requiring the learner to watch the full video."
+    ]
+  };
+}
 
 export function validateTopicsFile(
   value: unknown,
@@ -801,6 +831,7 @@ export function renderLessonInputMd(
     topic.visualEvidence && topic.visualEvidence.length > 0
       ? topic.visualEvidence.map((evidencePath) => `- \`${evidencePath}\``).join("\n")
       : "_No visual evidence paths recorded for this topic._";
+  const learnerProfileSection = renderLearnerProfileContext(context.learnerProfileJson);
   const teachingGuideSection = renderTeachingGuideContext(context.teachingGuideMd);
   const conceptCardsSection = renderConceptCardsContext(context.conceptsJson, topic.id);
   const resourcesSection = renderResourcesContext(context.resourcesMd, topic);
@@ -854,6 +885,10 @@ export function renderLessonInputMd(
     "",
     visualEvidence,
     "",
+    "## Learner profile",
+    "",
+    learnerProfileSection,
+    "",
     "## Teaching guide",
     "",
     teachingGuideSection,
@@ -875,6 +910,13 @@ export function renderLessonInputMd(
     `After writing \`${outputFile}\`, run: \`ytai learn ${videoFolder}\` to validate it and get the next step.`,
     ""
   ].join("\n");
+}
+
+function renderLearnerProfileContext(learnerProfileJson: string | undefined): string {
+  const trimmed = learnerProfileJson?.trim();
+  return trimmed
+    ? ["```json", trimmed, "```"].join("\n")
+    : "_learning/learner-profile.json is absent. Adapt from the role, task, teaching guide, and quality bar in this prompt, and avoid assuming advanced prior knowledge._";
 }
 
 function renderTeachingGuideContext(teachingGuideMd: string | undefined): string {

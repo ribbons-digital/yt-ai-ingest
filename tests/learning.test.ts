@@ -497,6 +497,15 @@ describe("renderLessonInputMd", () => {
   const excerpt = "[01:00] the model attends to every token\n[01:30] weights sum to one";
   const output = renderLessonInputMd(lessonTopic, 3, `\n${excerpt}\n`, folder);
   const contextualOutput = renderLessonInputMd(lessonTopic, 3, excerpt, folder, {
+    learnerProfileJson: JSON.stringify({
+      version: 1,
+      audienceLevel: "hands-on beginner",
+      goals: ["Skip the video while learning systematically."],
+      knownConcepts: ["vectors"],
+      doNotAssumeTerms: ["QKV"],
+      preferredDepth: "learn",
+      teachingPreferences: ["Use analogies before equations."]
+    }),
     teachingGuideMd: "Teach with analogies before equations.",
     conceptsJson: JSON.stringify({
       version: 1,
@@ -567,6 +576,13 @@ describe("renderLessonInputMd", () => {
   it("embeds the teaching guide content when provided", () => {
     expect(contextualOutput).toContain("## Teaching guide");
     expect(contextualOutput).toContain("Teach with analogies before equations.");
+  });
+
+  it("embeds the learner profile when provided", () => {
+    expect(contextualOutput).toContain("## Learner profile");
+    expect(contextualOutput).toContain('"audienceLevel":"hands-on beginner"');
+    expect(contextualOutput).toContain("Skip the video while learning systematically.");
+    expect(contextualOutput).toContain("Use analogies before equations.");
   });
 
   it("embeds only concept cards needed for the current topic", () => {
