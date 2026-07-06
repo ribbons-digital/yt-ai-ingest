@@ -60,6 +60,19 @@ export function safeLessonHref(rawHref: string): string | undefined {
     // Relative hrefs are checked below.
   }
 
+  return safeRelativeLessonHref(href);
+}
+
+function safeLessonImageHref(rawHref: string): string | undefined {
+  const href = rawHref.trim();
+  if (!href || /[\u0000-\u001f\u007f]/u.test(href)) {
+    return undefined;
+  }
+
+  return safeRelativeLessonHref(href);
+}
+
+function safeRelativeLessonHref(href: string): string | undefined {
   if (href.startsWith("/") || href.startsWith("#") || href.includes("\\")) {
     return undefined;
   }
@@ -289,7 +302,7 @@ function renderInline(value: string): string {
 
     const image = rest.match(/^!\[([^\]]*)\]\(([^)]+)\)/u);
     if (image) {
-      const href = safeLessonHref(image[2]);
+      const href = safeLessonImageHref(image[2]);
       if (href) {
         result += `<img class="inline-image" src="${escapeAttribute(href)}" alt="${escapeAttribute(image[1])}">`;
       } else {

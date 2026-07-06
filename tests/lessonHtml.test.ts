@@ -64,6 +64,38 @@ describe("lesson HTML renderer", () => {
     expect(html).toContain('<img src="../../frames/scout/frame_0001.jpg" alt="frames/scout/frame_0001.jpg">');
   });
 
+  it("keeps remote Markdown links but rejects remote Markdown images", () => {
+    const html = renderLessonHtml({
+      topic,
+      lessonMarkdown: [
+        "Use [safe docs](https://example.com/docs).",
+        "",
+        "![Remote frame](https://example.com/frame.jpg)",
+        "![Data frame](data:image/png;base64,abc)",
+        "![Script frame](javascript:alert(1))",
+        "![Absolute frame](/frames/scout/frame_0001.jpg)",
+        "![Traversal frame](../secret.jpg)",
+        "![Malformed frame](notes/%zz/file.jpg)",
+        "![Local frame](lesson-assets/frame.jpg)",
+        "![Scout frame](../../frames/scout/frame_0001.jpg)"
+      ].join("\n"),
+      concepts: [],
+      visualEvidence: []
+    });
+
+    expect(html).toContain('<a href="https://example.com/docs">safe docs</a>');
+    expect(html).toContain("![Remote frame](https://example.com/frame.jpg)");
+    expect(html).toContain("![Data frame](data:image/png;base64,abc)");
+    expect(html).toContain("![Script frame](javascript:alert(1))");
+    expect(html).toContain("![Absolute frame](/frames/scout/frame_0001.jpg)");
+    expect(html).toContain("![Traversal frame](../secret.jpg)");
+    expect(html).toContain("![Malformed frame](notes/%zz/file.jpg)");
+    expect(html).toContain('<img class="inline-image" src="lesson-assets/frame.jpg" alt="Local frame">');
+    expect(html).toContain('<img class="inline-image" src="../../frames/scout/frame_0001.jpg" alt="Scout frame">');
+    expect(html).not.toContain('src="https://example.com/frame.jpg"');
+    expect(html).not.toContain('src="data:image/png;base64,abc"');
+  });
+
   it("rejects unsafe hrefs", () => {
     expect(safeLessonHref("https://example.com/a")).toBe("https://example.com/a");
     expect(safeLessonHref("lesson-notes/page.html")).toBe("lesson-notes/page.html");
