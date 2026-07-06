@@ -18,6 +18,8 @@ import {
   validateConceptsFile,
   validateResourceSections,
   validateLessonMarkdown,
+  type Concept,
+  type ConceptsFile,
   type LearnArtifacts,
   type LearningProgress,
   type Topic,
@@ -27,6 +29,7 @@ import {
 import { formatSeconds, parseRange } from "../lib/timestamps.js";
 import { parseTranscriptCues } from "../lib/transcriptChunks.js";
 import { info, success, warn } from "../lib/ui.js";
+import { renderLessonHtml, safeLessonHref, type LessonHtmlVisualEvidence } from "../lib/lessonHtml.js";
 import { buildContextDocument } from "./context.js";
 
 type LearnOptions = {
@@ -174,6 +177,47 @@ export async function teach(
     "Next",
     `Have an LLM read learning/lessons/${paddedNumber}-${topic.id}-input.md and write learning/${lessonFile}, then run: ytai learn ${videoFolder}`
   );
+}
+
+export async function renderLesson(videoFolder: string, topicId: string, options: LearnOptions = {}): Promise<void> {
+  const { topics: topicList } = await requireValidTopics(videoFolder);
+  const topic = topicList.find((candidate) => candidate.id === topicId);
+  if (!topic) {
+    throw new Error(`Unknown topic id "${topicId}". Known ids: ${topicList.map((candidate) => candidate.id).join(", ")}`);
+  }
+
+  const ordered = orderTopicsForTeaching(topicList);
+  const lessonNumber = ordered.findIndex((candidate) => candidate.id === topic.id) + 1;
+  const paddedNumber = String(lessonNumber).padStart(2, "0");
+  const canonicalLessonFile = `lessons/${paddedNumber}-${topic.id}.md`;
+  const progress = await readProgress(videoFolder);
+  const lessonFile = selectRefreshLessonFile(progress.lessons[topic.id]?.lessonFile, canonicalLessonFile);
+  const lessonPath = path.join(videoFolder, "learning", lessonFile);
+
+  if (!(await pathExists(lessonPath))) {
+    throw new Error(`Existing lesson not found at learning/${lessonFile}. Run: ytai teach ${videoFolder} ${topic.id} first.`);
+  }
+
+  const concepts = await readMatchingConcepts(videoFolder, topic.id);
+  const visualEvidence = await collectVisualEvidence(videoFolder, topic);
+  const htmlFile = lessonFile.replace(/\.md$/u, ".html");
+  const htmlPath = path.join(videoFolder, "learning", htmlFile);
+  const html = renderLessonHtml({
+    topic,
+    lessonMarkdown: await readFile(lessonPath, "utf8"),
+    concepts,
+    visualEvidence
+  });
+
+  if (options.dryRun) {
+    info("Dry run", `Would write ${htmlPath}`);
+  } else {
+    await mkdir(path.dirname(htmlPath), { recursive: true });
+    await writeFile(htmlPath, html, "utf8");
+    success("Lesson HTML written", htmlPath);
+  }
+
+  info("Next", `Open ${htmlPath} in a browser or inline artifact viewer. Regenerate it after editing learning/${lessonFile}.`);
 }
 
 export async function learnStatus(
@@ -394,6 +438,88 @@ async function readConcepts(videoFolder: string, topics: Topic[]): Promise<Conce
     exists: true,
     issues: validateConceptsFile(parsed, { topics })
   };
+}
+
+async function readMatchingConcepts(videoFolder: string, topicId: string): Promise<Concept[]> {
+  const conceptsPath = path.join(videoFolder, "learning", "concepts.json");
+  if (!(await pathExists(conceptsPath))) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(conceptsPath, "utf8"));
+  } catch {
+    return [];
+  }
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as ConceptsFile).concepts)) {
+    return [];
+  }
+  return (parsed as ConceptsFile).concepts.filter(
+    (concept): concept is Concept => isRenderableConcept(concept) && concept.neededForTopics.includes(topicId)
+  );
+}
+
+function isRenderableConcept(concept: unknown): concept is Concept {
+  if (!concept || typeof concept !== "object") {
+    return false;
+  }
+  const candidate = concept as Partial<Concept>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.term === "string" &&
+    typeof candidate.type === "string" &&
+    typeof candidate.plainDefinition === "string" &&
+    typeof candidate.whyItMatters === "string" &&
+    Array.isArray(candidate.neededForTopics) &&
+    candidate.neededForTopics.every((topicId) => typeof topicId === "string")
+  );
+}
+
+async function collectVisualEvidence(videoFolder: string, topic: Topic): Promise<LessonHtmlVisualEvidence[]> {
+  const evidence = topic.visualEvidence ?? [];
+  const resolved = await Promise.all(
+    evidence.map(async (evidencePath) => {
+      const href = safeVideoFolderRelativePath(evidencePath);
+      if (!href) {
+        return undefined;
+      }
+      if (!(await pathExists(path.join(videoFolder, href)))) {
+        return undefined;
+      }
+      return { path: href, href: `../../${href}` };
+    })
+  );
+  return resolved.filter((item): item is LessonHtmlVisualEvidence => item !== undefined);
+}
+
+function safeVideoFolderRelativePath(rawPath: string): string | undefined {
+  const normalized = rawPath.split(path.sep).join("/");
+  if (
+    !normalized ||
+    path.posix.isAbsolute(normalized) ||
+    path.win32.isAbsolute(normalized) ||
+    normalized.includes("\\") ||
+    /^[a-zA-Z][a-zA-Z\d+.-]*:/u.test(normalized) ||
+    normalized.split("/").some(isUnsafeVideoFolderSegment)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function isUnsafeVideoFolderSegment(segment: string): boolean {
+  if (segment.length === 0) {
+    return true;
+  }
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return true;
+  }
+  return decoded === "." || decoded === "..";
 }
 
 type ResourcesReadResult = {
