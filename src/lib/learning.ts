@@ -1023,15 +1023,20 @@ export function validateResourceSections(resourcesMd: string | undefined, topics
 
 export function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
   const lines = markdown.split(/\r?\n/);
-  const topicMatchesHeading = buildTopicHeadingMatcher(topic);
+  const idMatcher = buildTopicHeadingMatcher(topic, "id");
+  const titleMatcher = buildTopicHeadingMatcher(topic, "title");
 
+  return findResourceSectionByHeading(lines, idMatcher) ?? findResourceSectionByHeading(lines, titleMatcher);
+}
+
+function findResourceSectionByHeading(lines: string[], matchesHeading: (heading: string) => boolean): string | undefined {
   for (let index = 0; index < lines.length; index += 1) {
     const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[index]);
     if (!heading) {
       continue;
     }
 
-    if (!topicMatchesHeading(heading[2])) {
+    if (!matchesHeading(heading[2])) {
       continue;
     }
     const level = heading[1].length;
@@ -1050,18 +1055,28 @@ export function findTopicResourceSection(markdown: string, topic: Topic): string
   return undefined;
 }
 
-function buildTopicHeadingMatcher(topic: Topic): (heading: string) => boolean {
+function buildTopicHeadingMatcher(topic: Topic, mode: "id" | "title"): (heading: string) => boolean {
   const topicId = normalizeHeadingText(topic.id);
   const topicTitle = normalizeHeadingText(topic.title);
 
   return (heading: string) => {
-    const normalizedHeading = normalizeHeadingText(heading);
-    const paddedHeading = ` ${normalizedHeading} `;
-    if (topicId.length > 0 && paddedHeading.includes(` ${topicId} `)) {
+    if (mode === "id") {
+      return topicId.length > 0 && headingHasExactBacktickedTopicId(heading, topicId);
+    }
+
+    const headingWithoutBackticks = heading.replace(/`[^`]+`/g, " ");
+    return topicTitle.length > 0 && normalizeHeadingText(headingWithoutBackticks) === topicTitle;
+  };
+}
+
+function headingHasExactBacktickedTopicId(heading: string, normalizedTopicId: string): boolean {
+  for (const match of heading.matchAll(/`([^`]+)`/g)) {
+    if (normalizeHeadingText(match[1] ?? "") === normalizedTopicId) {
       return true;
     }
-    return topicTitle.length > 0 && paddedHeading.includes(` ${topicTitle} `);
-  };
+  }
+
+  return normalizeHeadingText(heading) === normalizedTopicId;
 }
 
 function hasResourceLabel(section: string, label: string): boolean {

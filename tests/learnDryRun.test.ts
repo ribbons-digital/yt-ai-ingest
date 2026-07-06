@@ -86,12 +86,21 @@ describe("learning command dry-run behavior", () => {
     expect(JSON.parse(await readFile(profilePath, "utf8"))).toEqual(customProfile);
   });
 
-  it("plan dry-run validates topics but does not write plan-input.md", async () => {
+  it("plan dry-run previews plan input and missing learner profile without writing files", async () => {
     const videoFolder = await makeVideoFolder();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let logs = "";
+    try {
+      await plan(videoFolder, { dryRun: true });
+      logs = logSpy.mock.calls.flat().join("\n");
+    } finally {
+      logSpy.mockRestore();
+    }
 
-    await plan(videoFolder, { dryRun: true });
-
+    expect(logs).toContain(path.join(videoFolder, "learning", "plan-input.md"));
+    expect(logs).toContain(path.join(videoFolder, "learning", "learner-profile.json"));
     expect(await pathExists(path.join(videoFolder, "learning", "plan-input.md"))).toBe(false);
+    expect(await pathExists(path.join(videoFolder, "learning", "learner-profile.json"))).toBe(false);
   });
 
   it("teach preserves existing lesson review data when regenerating a prompt", async () => {
@@ -153,8 +162,18 @@ describe("learning command dry-run behavior", () => {
     };
     await writeFile(path.join(videoFolder, "learning", "progress.json"), JSON.stringify(progress), "utf8");
 
-    await teach(videoFolder, "core-topic", { dryRun: true });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let logs = "";
+    try {
+      await teach(videoFolder, "core-topic", { dryRun: true });
+      logs = logSpy.mock.calls.flat().join("\n");
+    } finally {
+      logSpy.mockRestore();
+    }
 
+    expect(logs).toContain(path.join(videoFolder, "learning", "learner-profile.json"));
+    expect(logs).toContain(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"));
+    expect(await pathExists(path.join(videoFolder, "learning", "learner-profile.json"))).toBe(false);
     expect(await pathExists(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"))).toBe(false);
     expect(await readProgress(videoFolder)).toEqual(progress);
   });

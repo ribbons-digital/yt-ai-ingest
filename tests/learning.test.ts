@@ -542,6 +542,48 @@ describe("learning resource sections", () => {
     expect(section).not.toContain("https://example.com/spectrograms");
   });
 
+  it("prefers exact backticked ids when topic titles overlap", () => {
+    const overlappingResources = [
+      "# Learning resources",
+      "",
+      "## Self attention (`self-attention`)",
+      "",
+      "- URL: https://example.com/self-attention",
+      "- Why it helps: It explains self attention.",
+      "- Focus on: Token-to-token attention.",
+      "- Skip for now: Kernel details.",
+      "- Use after: Basic sequence modeling.",
+      "",
+      "## Attention mechanisms (`attention`)",
+      "",
+      "- URL: https://example.com/attention",
+      "- Why it helps: It covers the broader mechanism.",
+      "- Focus on: Query-key-value weighting.",
+      "- Skip for now: Optimized implementations.",
+      "- Use after: The attention lesson."
+    ].join("\n");
+
+    const section = findTopicResourceSection(overlappingResources, topics[0]);
+    expect(section).toContain("## Attention mechanisms (`attention`)");
+    expect(section).toContain("https://example.com/attention");
+    expect(section).not.toContain("https://example.com/self-attention");
+  });
+
+  it("does not match topic ids as in-between heading substrings", () => {
+    const section = findTopicResourceSection(
+      [
+        "# Learning resources",
+        "",
+        "## Self attention",
+        "",
+        "- URL: https://example.com/self-attention"
+      ].join("\n"),
+      topics[0]
+    );
+
+    expect(section).toBeUndefined();
+  });
+
   it("warns when a core topic has no resource section", () => {
     const issues = validateResourceSections(resourcesMd.replace("## Spectrograms (`spectrograms`)", "## Audio pictures"), topics);
     expect(issues).toContainEqual({
