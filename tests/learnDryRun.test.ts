@@ -218,6 +218,42 @@ describe("learning command dry-run behavior", () => {
     });
   });
 
+  it("teach --refresh ignores invalid stored lesson paths and reads the canonical lesson", async () => {
+    const invalidStoredPaths: unknown[] = [
+      "../escape.md",
+      "/tmp/escape.md",
+      "lessons/../escape.md",
+      "lessons\\escape.md",
+      "notes/core-topic.md",
+      "lessons/core-topic.txt",
+      42
+    ];
+
+    for (const storedLessonFile of invalidStoredPaths) {
+      const videoFolder = await makeVideoFolder();
+      const lessonPath = path.join(videoFolder, "learning", "lessons", "01-core-topic.md");
+      const originalLesson = `# Core Topic\n\n## Learning goal\nCanonical lesson for ${String(storedLessonFile)}.`;
+      await mkdir(path.dirname(lessonPath), { recursive: true });
+      await writeFile(lessonPath, originalLesson, "utf8");
+      await writeFile(
+        path.join(videoFolder, "learning", "progress.json"),
+        JSON.stringify({
+          version: 1,
+          lessons: {
+            "core-topic": { status: "done", lessonFile: storedLessonFile }
+          }
+        }),
+        "utf8"
+      );
+
+      await teach(videoFolder, "core-topic", { refresh: true });
+
+      const prompt = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"), "utf8");
+      expect(prompt).toContain("The current lesson was read from `learning/lessons/01-core-topic.md`.");
+      expect(prompt).toContain(originalLesson);
+    }
+  });
+
   it("teach --refresh dry-run writes nothing and preserves progress", async () => {
     const videoFolder = await makeVideoFolder();
     const lessonPath = path.join(videoFolder, "learning", "lessons", "01-core-topic.md");

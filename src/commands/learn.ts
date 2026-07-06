@@ -138,9 +138,8 @@ export async function teach(
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const lessonFile = `lessons/${paddedNumber}-${topic.id}.md`;
   const excerpt = await buildTranscriptExcerpt(videoFolder, topic);
-  const repairContext = options.refresh
-    ? await readLessonRepairContext(videoFolder, progress.lessons[topic.id]?.lessonFile ?? lessonFile)
-    : undefined;
+  const repairLessonFile = selectRefreshLessonFile(progress.lessons[topic.id]?.lessonFile, lessonFile);
+  const repairContext = options.refresh ? await readLessonRepairContext(videoFolder, repairLessonFile) : undefined;
   if (options.dryRun) {
     await previewLearnerProfileWrite(videoFolder);
   } else {
@@ -567,6 +566,26 @@ export async function buildTranscriptExcerpt(videoFolder: string, topic: Topic):
   return sections.length > 0
     ? sections.join("\n\n")
     : "_This topic declares no timestamp ranges._";
+}
+
+function selectRefreshLessonFile(storedLessonFile: unknown, canonicalLessonFile: string): string {
+  if (!isValidLearningLessonPath(storedLessonFile)) {
+    return canonicalLessonFile;
+  }
+  return storedLessonFile;
+}
+
+function isValidLearningLessonPath(lessonFile: unknown): lessonFile is string {
+  if (typeof lessonFile !== "string" || lessonFile.length === 0) {
+    return false;
+  }
+  if (path.isAbsolute(lessonFile) || path.win32.isAbsolute(lessonFile) || lessonFile.includes("\\")) {
+    return false;
+  }
+  if (!lessonFile.startsWith("lessons/") || !lessonFile.endsWith(".md")) {
+    return false;
+  }
+  return !lessonFile.split("/").some((segment) => segment === ".." || segment.length === 0);
 }
 
 async function readLessonRepairContext(
