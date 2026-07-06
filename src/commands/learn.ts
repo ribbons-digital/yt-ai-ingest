@@ -16,6 +16,7 @@ import {
   toStatusJson,
   validateTopicsFile,
   validateConceptsFile,
+  validateResourceSections,
   validateLessonMarkdown,
   type LearnArtifacts,
   type LearningProgress,
@@ -181,7 +182,7 @@ export async function learnStatus(
 
   if (options.check) {
     if (!options.json) {
-      printIssues([...artifacts.topicsIssues, ...artifacts.conceptsIssues]);
+      printIssues([...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.resourcesIssues]);
       if (!artifacts.hasPlanMd) {
         warn("learning/plan.md", "missing");
       }
@@ -378,6 +379,30 @@ async function readConcepts(videoFolder: string, topics: Topic[]): Promise<Conce
   };
 }
 
+type ResourcesReadResult = {
+  exists: boolean;
+  issues: ValidationIssue[];
+};
+
+async function readResources(videoFolder: string, topics: Topic[]): Promise<ResourcesReadResult> {
+  const resourcesPath = path.join(videoFolder, "learning", "resources.md");
+  if (!(await pathExists(resourcesPath))) {
+    return { exists: false, issues: [] };
+  }
+
+  try {
+    return {
+      exists: true,
+      issues: validateResourceSections(await readFile(resourcesPath, "utf8"), topics)
+    };
+  } catch {
+    return {
+      exists: true,
+      issues: [{ severity: "warning", message: "learning/resources.md could not be read for resource validation." }]
+    };
+  }
+}
+
 export async function requireValidTopics(
   videoFolder: string
 ): Promise<{ raw: string; topics: Topic[] }> {
@@ -423,6 +448,7 @@ async function collectArtifacts(videoFolder: string): Promise<LearnArtifacts> {
   const learningDir = path.join(videoFolder, "learning");
   const topicsResult = await readTopics(videoFolder);
   const conceptsResult = await readConcepts(videoFolder, topicsResult.topics);
+  const resourcesResult = await readResources(videoFolder, topicsResult.topics);
   const progress = await readProgress(videoFolder);
   const learningFiles = await listFilesRecursive(learningDir);
   const learningRelative = learningFiles.map((file) =>
@@ -443,6 +469,7 @@ async function collectArtifacts(videoFolder: string): Promise<LearnArtifacts> {
     topics: topicsResult.topics,
     lessonIssues: await collectLessonIssues(learningDir, lessonOutputs),
     conceptsIssues: conceptsResult.issues,
+    resourcesIssues: resourcesResult.issues,
     hasPlanInput: learningRelative.includes("plan-input.md"),
     hasPlanMd: learningRelative.includes("plan.md"),
     hasResourcesMd: learningRelative.includes("resources.md"),

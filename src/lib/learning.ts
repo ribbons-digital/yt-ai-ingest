@@ -101,6 +101,7 @@ export type LearnArtifacts = {
   topics: Topic[];
   lessonIssues: ValidationIssue[];
   conceptsIssues: ValidationIssue[];
+  resourcesIssues: ValidationIssue[];
   hasPlanInput: boolean;
   hasPlanMd: boolean;
   hasResourcesMd: boolean;
@@ -767,10 +768,27 @@ export function renderPlanInputMd(topicsJson: string, videoFolder: string): stri
     "",
     "## resources.md requirements",
     "",
-    "- For each `core` topic list 2 to 4 external resources.",
-    "- Each resource needs a URL, one line on why it helps, and one line saying what the learner should focus on.",
+    "- For each `core` topic, include one `##` section whose heading names both the topic title and topic id.",
+    "- Under each core-topic section, list 2 to 4 external resources.",
+    "- Each resource must include these labeled lines: `URL`, `Why it helps`, `Focus on`, `Skip for now`, and `Use after`.",
+    "- Use `Focus on` for the exact part the learner should study, `Skip for now` for distracting or too-advanced parts, and `Use after` for when this resource belongs in the learning path.",
     "- Use your own search tools or knowledge to find resources.",
     "- Mark any link you could not verify as `(unverified)`.",
+    "",
+    "Expected resources.md shape:",
+    "",
+    "```markdown",
+    "# Learning resources",
+    "",
+    "## Gradient descent basics (`gradient-descent-basics`)",
+    "",
+    "### Resource title",
+    "- URL: https://example.com/resource",
+    "- Why it helps: One sentence on why this resource is worth the learner's time.",
+    "- Focus on: The specific section, chapter, timestamp, or concept to study.",
+    "- Skip for now: The part that is distracting, too advanced, or not needed yet.",
+    "- Use after: The lesson, prerequisite, or confidence level that should come before this resource.",
+    "```",
     "",
     "## concepts.json requirements",
     "",
@@ -970,7 +988,40 @@ function renderResourcesContext(resourcesMd: string | undefined, topic: Topic): 
     : `_No matching section for \`${topic.id}\` was found in learning/resources.md. Proceed cautiously by keeping suggested learning specific and clearly marking anything inferred._`;
 }
 
-function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
+const REQUIRED_RESOURCE_LABELS = ["URL", "Why it helps", "Focus on", "Skip for now", "Use after"] as const;
+
+export function validateResourceSections(resourcesMd: string | undefined, topics: Topic[]): ValidationIssue[] {
+  const trimmed = resourcesMd?.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const issues: ValidationIssue[] = [];
+  for (const topic of topics) {
+    if (topic.importance !== "core") {
+      continue;
+    }
+
+    const section = findTopicResourceSection(trimmed, topic);
+    if (!section) {
+      issues.push(issueWarning(`core topic "${topic.id}" has no resource section in learning/resources.md.`));
+      continue;
+    }
+
+    const missingLabels = REQUIRED_RESOURCE_LABELS.filter((label) => !hasResourceLabel(section, label));
+    if (missingLabels.length > 0) {
+      issues.push(
+        issueWarning(
+          `core topic "${topic.id}" resource section in learning/resources.md is missing required guidance: ${missingLabels.join(", ")}.`
+        )
+      );
+    }
+  }
+
+  return issues;
+}
+
+export function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
   const lines = markdown.split(/\r?\n/);
   const topicMatchesHeading = buildTopicHeadingMatcher(topic);
 
@@ -1000,15 +1051,26 @@ function findTopicResourceSection(markdown: string, topic: Topic): string | unde
 }
 
 function buildTopicHeadingMatcher(topic: Topic): (heading: string) => boolean {
-  const targetPhrases = [topic.id, topic.title]
-    .map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())
-    .filter((value) => value.length > 0);
+  const topicId = normalizeHeadingText(topic.id);
+  const topicTitle = normalizeHeadingText(topic.title);
 
   return (heading: string) => {
-    const normalizedHeading = heading.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const normalizedHeading = normalizeHeadingText(heading);
     const paddedHeading = ` ${normalizedHeading} `;
-    return targetPhrases.some((phrase) => paddedHeading.includes(` ${phrase} `));
+    if (topicId.length > 0 && paddedHeading.includes(` ${topicId} `)) {
+      return true;
+    }
+    return topicTitle.length > 0 && paddedHeading.includes(` ${topicTitle} `);
   };
+}
+
+function hasResourceLabel(section: string, label: string): boolean {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*(?:[-*]\\s*)?${escapedLabel}\\s*:`, "im").test(section);
+}
+
+function normalizeHeadingText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 export function renderQuizInputMd(
@@ -1108,7 +1170,7 @@ export function renderLearnStatus(
     lines.push("", `Quiz next: ytai quiz ${artifacts.videoFolder} --due`);
   }
 
-  const issues = [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues];
+  const issues = [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.resourcesIssues, ...artifacts.lessonIssues];
   if (issues.length > 0) {
     lines.push("", "Issues:");
     for (const issue of issues) {
@@ -1139,7 +1201,7 @@ export function toStatusJson(
       conceptsJson: artifacts.hasConceptsJson
     },
     lessons: lessonCounts(artifacts),
-    issues: [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues],
+    issues: [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.resourcesIssues, ...artifacts.lessonIssues],
     review,
     nextAction: next
   };

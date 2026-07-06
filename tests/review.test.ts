@@ -54,6 +54,7 @@ function completeArtifacts(overrides: Partial<LearnArtifacts> = {}): LearnArtifa
     topics: [topic("intro")],
     lessonIssues: [],
     conceptsIssues: [],
+    resourcesIssues: [],
     hasPlanInput: true,
     hasPlanMd: true,
     hasResourcesMd: true,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findTopicResourceSection,
   orderTopicsForTeaching,
   renderLessonInputMd,
   renderPlanInputMd,
@@ -7,6 +8,7 @@ import {
   renderTopicsInputMd,
   validateTopicsFile,
   validateConceptsFile,
+  validateResourceSections,
   validateLessonMarkdown,
   type Topic,
   type ValidationIssue
@@ -473,6 +475,15 @@ describe("renderPlanInputMd", () => {
     expect(output).toContain("neededForTopics");
   });
 
+  it("requires resource guidance for focus, skip, and use-after timing", () => {
+    expect(output).toContain("`Focus on`");
+    expect(output).toContain("`Skip for now`");
+    expect(output).toContain("`Use after`");
+    expect(output).toContain("- Focus on: The specific section, chapter, timestamp, or concept to study.");
+    expect(output).toContain("- Skip for now: The part that is distracting, too advanced, or not needed yet.");
+    expect(output).toContain("- Use after: The lesson, prerequisite, or confidence level that should come before this resource.");
+  });
+
   it("embeds the trimmed topics.json verbatim in a json fence", () => {
     expect(output).toContain("```json\n" + topicsJson + "\n```");
   });
@@ -481,6 +492,72 @@ describe("renderPlanInputMd", () => {
     expect(output).toContain(
       "After writing all three files, run: `ytai learn videos/demo` to validate them and get the next step."
     );
+  });
+});
+
+describe("learning resource sections", () => {
+  const topics: Topic[] = [
+    {
+      id: "attention",
+      title: "Attention mechanisms",
+      importance: "core",
+      timestamps: ["01:00-02:00"],
+      summary: "The video explains attention over tokens."
+    },
+    {
+      id: "spectrograms",
+      title: "Spectrograms",
+      importance: "core",
+      timestamps: ["03:00-04:00"],
+      summary: "The video shows spectrograms."
+    }
+  ];
+  const resourcesMd = [
+    "# Learning resources",
+    "",
+    "## Attention mechanisms (`attention`)",
+    "",
+    "### Illustrated attention guide",
+    "- URL: https://example.com/attention",
+    "- Why it helps: It visualizes query-key-value weighting.",
+    "- Focus on: The diagrams for attention weights.",
+    "- Skip for now: Multi-head implementation details.",
+    "- Use after: The attention lesson's mental model.",
+    "",
+    "## Spectrograms (`spectrograms`)",
+    "",
+    "### Spectrogram primer",
+    "- URL: https://example.com/spectrograms",
+    "- Why it helps: It links audio windows to frequency bins.",
+    "- Focus on: Windowing examples.",
+    "- Skip for now: Advanced DSP proofs.",
+    "- Use after: The first audio preprocessing lesson."
+  ].join("\n");
+
+  it("extracts only the matching resource section for a topic", () => {
+    const section = findTopicResourceSection(resourcesMd, topics[0]);
+    expect(section).toContain("## Attention mechanisms (`attention`)");
+    expect(section).toContain("https://example.com/attention");
+    expect(section).toContain("Focus on: The diagrams for attention weights.");
+    expect(section).not.toContain("https://example.com/spectrograms");
+  });
+
+  it("warns when a core topic has no resource section", () => {
+    const issues = validateResourceSections(resourcesMd.replace("## Spectrograms (`spectrograms`)", "## Audio pictures"), topics);
+    expect(issues).toContainEqual({
+      severity: "warning",
+      message: 'core topic "spectrograms" has no resource section in learning/resources.md.'
+    });
+  });
+
+  it("warns when a core topic resource section is missing required guidance labels", () => {
+    const issues = validateResourceSections(
+      ["# Learning resources", "", "## Attention mechanisms (`attention`)", "", "- https://example.com/attention"].join("\n"),
+      [topics[0]]
+    );
+    expect(issues[0]?.message).toContain("missing required guidance");
+    expect(issues[0]?.message).toContain("URL");
+    expect(issues[0]?.message).toContain("Use after");
   });
 });
 
@@ -533,14 +610,23 @@ describe("renderLessonInputMd", () => {
     resourcesMd: [
       "# Learning resources",
       "",
-      "## Attention mechanisms",
+      "## Attention mechanisms (`attention`)",
       "",
-      "- https://example.com/attention",
-      "  - Focus on attention weights.",
+      "### Illustrated attention guide",
+      "- URL: https://example.com/attention",
+      "- Why it helps: It visualizes query-key-value weighting.",
+      "- Focus on: The diagrams for attention weights.",
+      "- Skip for now: Multi-head implementation details.",
+      "- Use after: The attention lesson's mental model.",
       "",
-      "## Spectrograms",
+      "## Spectrograms (`spectrograms`)",
       "",
-      "- https://example.com/spectrograms"
+      "### Spectrogram primer",
+      "- URL: https://example.com/spectrograms",
+      "- Why it helps: It links audio windows to frequency bins.",
+      "- Focus on: Windowing examples.",
+      "- Skip for now: Advanced DSP proofs.",
+      "- Use after: The first audio preprocessing lesson."
     ].join("\n")
   });
 
@@ -598,6 +684,9 @@ describe("renderLessonInputMd", () => {
     expect(contextualOutput).toContain("## Attention mechanisms");
     expect(contextualOutput).toContain("https://example.com/attention");
     expect(contextualOutput).not.toContain("https://example.com/spectrograms");
+    expect(contextualOutput).toContain("Focus on: The diagrams for attention weights.");
+    expect(contextualOutput).toContain("Skip for now: Multi-head implementation details.");
+    expect(contextualOutput).toContain("Use after: The attention lesson's mental model.");
   });
 
   it("calls out missing persistent teaching artifacts", () => {
