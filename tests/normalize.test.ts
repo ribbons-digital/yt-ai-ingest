@@ -121,6 +121,20 @@ describe("normalizeArtifacts", () => {
     expect(names).not.toContain("source.webp");
   });
 
+  it("keeps transcript.vtt when transcript conversion cannot start", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-normalize-"));
+    await writeFile(path.join(videoFolder, "source.en.vtt"), "WEBVTT", "utf8");
+
+    vi.mocked(runCommand).mockRejectedValue(new Error("spawn ffmpeg ENOENT"));
+
+    const assets = await normalizeArtifacts(videoFolder, { dryRun: false, verbose: false });
+
+    const names = await readdir(videoFolder);
+    expect(assets.transcript).toBe(true);
+    expect(names).toContain("transcript.vtt");
+    expect(warn).toHaveBeenCalledWith("Transcript conversion failed", "keeping transcript.vtt");
+  });
+
   it("still normalizes everything when no thumbnail is present", async () => {
     const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-normalize-"));
     await writeFile(path.join(videoFolder, "source.info.json"), "{}", "utf8");

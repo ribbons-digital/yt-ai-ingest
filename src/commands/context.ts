@@ -11,13 +11,13 @@ type ContextOptions = {
 
 /**
  * Maximum characters for the full summary-input.md transcript section.
- * When the full transcript fits, we include the chunked index covering
- * the entire duration. When it exceeds this, we still chunk but cap total output.
+ * Short transcripts are included verbatim. Long transcripts are chunked across
+ * the entire duration, then capped to this total output budget.
  */
 const TRANSCRIPT_SECTION_BUDGET = 80000;
 
 export async function summarize(videoFolder: string, options: ContextOptions = {}): Promise<void> {
-  const context = await buildContext(videoFolder, undefined, options);
+  const context = await buildContextDocument(videoFolder, undefined, options);
   const outPath = path.join(videoFolder, "analysis", "summary-input.md");
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, context, "utf8");
@@ -32,7 +32,7 @@ export async function ask(
   question: string,
   options: ContextOptions = {}
 ): Promise<void> {
-  const context = await buildContext(videoFolder, question, options);
+  const context = await buildContextDocument(videoFolder, question, options);
   const outPath = path.join(videoFolder, "analysis", "question-input.md");
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, context, "utf8");
@@ -42,10 +42,10 @@ export async function ask(
   }
 }
 
-async function buildContext(
+export async function buildContextDocument(
   videoFolder: string,
-  question: string | undefined,
-  options: ContextOptions
+  question?: string,
+  options: ContextOptions = {}
 ): Promise<string> {
   if (!(await pathExists(videoFolder))) {
     throw new Error(`Video folder does not exist: ${videoFolder}`);

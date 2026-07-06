@@ -49,7 +49,7 @@ function stripTags(text: string): string {
 /**
  * Parse a VTT or SRT transcript into an array of cues { startSec, endSec, text }.
  */
-function parseCues(transcript: string): { startSec: number; endSec: number; text: string }[] {
+export function parseTranscriptCues(transcript: string): { startSec: number; endSec: number; text: string }[] {
   const lines = transcript.split(/\r?\n/);
   const cues: { startSec: number; endSec: number; text: string }[] = [];
   let i = 0;
@@ -128,7 +128,7 @@ export function chunkTranscript(
   const chunkSec = options.chunkSec ?? 300; // default 5-minute chunks
   const previewChars = options.previewChars ?? 2000;
 
-  const cues = parseCues(transcript);
+  const cues = parseTranscriptCues(transcript);
   if (cues.length === 0) {
     return { chunks: [], totalSec: 0, totalChunks: 0 };
   }
