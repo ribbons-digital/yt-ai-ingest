@@ -51,7 +51,9 @@ For local files it uses ffmpeg with stream copy (`-c copy`) by default, and `--f
 It skips when a transcript already exists unless `--force`, honors `--whisper-model` and `--language`, and updates `ingest-status.json` on success.
 The same transcription runs during ingest and prepare via `--transcribe`, where a failure degrades to a status warning with a `ytai transcribe` retry hint.
 
-`ytai frames` accepts either `--around TIMESTAMP` or repeated `--range START-END` values. It writes a `frames_manifest.json` after successful extraction.
+`ytai frames` accepts either `--around TIMESTAMP` or repeated `--range START-END` values.
+It prompts for an output directory in interactive terminals when `--out` is omitted, defaulting to `<video-folder>/frames`.
+It writes a `frames_manifest.json` after successful extraction.
 
 Frame modes:
 

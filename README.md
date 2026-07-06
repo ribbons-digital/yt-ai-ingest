@@ -267,6 +267,7 @@ Modes:
 - `auto`: uses `seek` for one range, `select` for close ranges, and `seek` for far-apart ranges in videos over one hour.
 
 Every successful extraction writes `frames_manifest.json`.
+When run interactively without `--out`, `ytai frames` prompts for the output directory and defaults to `<video-folder>/frames`.
 
 ## Visual Scouting
 

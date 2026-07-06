@@ -50,7 +50,7 @@ Read `references/cli-behavior.md` when changing command behavior or output struc
 | `IngestedAssets` | `ingest.ts` | Asset map: metadata, description, transcript, video, audio, thumbnail |
 | `IngestStatus` | `ingest.ts` | Written to `ingest-status.json`: URL, timestamp, assets, warnings |
 | `IngestOptions` | `ingest.ts` | Options: `transcriptOnly`, `rateLimit`, `cookiesFromBrowser`, `cookiesPath`, `resume`, `link`, `transcribe`, `whisperModel`, `language` |
-| `YtDlpErrorCategory` | `ingest.ts` | Enum: rate_limit, video_unavailable, age_restricted, geo_blocked, no_formats, network_error, unknown |
+| `YtDlpErrorCategory` | `ingest.ts` | Enum: rate_limit, forbidden, video_unavailable, age_restricted, geo_blocked, no_formats, network_error, unknown |
 | `YtDlpErrorInfo` | `ingest.ts` | Classified error: `{ category, message, suggestion }` |
 | `IngestSource` | `ingest.ts` | Provenance in `ingest-status.json`: `{ type: "youtube" \| "local", url?, originalPath? }`; legacy files without it default to youtube |
 | `TopicsFile` / `Topic` | `learning.ts` | `learning/topics.json` schema v1: kebab-case `id`, `title`, `importance` (core/supporting/tangent), `timestamps`, `summary`, optional `claims`/`prerequisites`/`visualEvidence` |
@@ -76,7 +76,7 @@ Read `references/cli-behavior.md` when changing command behavior or output struc
 | `--enhanced-scout` | prepare | During scout, also create ordered temporal frame groups before summarize |
 | `--interval` | scout | Seconds between sampled scout frames |
 | `--columns` | scout | Contact sheet columns |
-| `--out` | scout, frames | Output directory for scout frames or extracted frames |
+| `--out` | scout, frames | Output directory for scout frames or extracted frames; frames prompts in interactive terminals when omitted |
 | `--enhanced` | scout | Create ordered temporal frame groups around each scout moment |
 | `--link` | ingest, prepare | Hardlink a local source video instead of copying; falls back to copy when hardlinks fail |
 | `--transcribe` | ingest, prepare | After ingest, transcribe `audio.wav` locally with whisper when no transcript exists |

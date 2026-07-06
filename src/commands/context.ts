@@ -11,8 +11,8 @@ type ContextOptions = {
 
 /**
  * Maximum characters for the full summary-input.md transcript section.
- * When the full transcript fits, we include the chunked index covering
- * the entire duration. When it exceeds this, we still chunk but cap total output.
+ * Short transcripts are included verbatim. Long transcripts are chunked across
+ * the entire duration, then capped to this total output budget.
  */
 const TRANSCRIPT_SECTION_BUDGET = 80000;
 
