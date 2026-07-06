@@ -178,6 +178,109 @@ describe("learning command dry-run behavior", () => {
     expect(await readProgress(videoFolder)).toEqual(progress);
   });
 
+  it("teach --refresh writes a repair prompt without overwriting the existing lesson", async () => {
+    const videoFolder = await makeVideoFolder();
+    const lessonPath = path.join(videoFolder, "learning", "lessons", "01-core-topic.md");
+    const originalLesson = "# Core Topic\n\n## Learning goal\nOld summary-only lesson.";
+    const progress = {
+      version: 1,
+      lessons: {
+        "core-topic": {
+          status: "done",
+          lessonFile: "lessons/01-core-topic.md",
+          scores: [{ date: "2026-01-02T00:00:00.000Z", score: 90 }],
+          nextReviewAt: "2026-01-03T00:00:00.000Z"
+        }
+      }
+    };
+    await mkdir(path.dirname(lessonPath), { recursive: true });
+    await writeFile(lessonPath, originalLesson, "utf8");
+    await writeFile(path.join(videoFolder, "learning", "progress.json"), JSON.stringify(progress), "utf8");
+
+    await teach(videoFolder, "core-topic", { refresh: true });
+
+    const prompt = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"), "utf8");
+    expect(prompt).toContain("# Lesson Repair Task: Core Topic");
+    expect(prompt).toContain("## Existing lesson to repair");
+    expect(prompt).toContain(originalLesson);
+    expect(prompt).toContain("## Current validation warnings");
+    expect(prompt).toContain('missing required heading "## Practice"');
+    expect(await readFile(lessonPath, "utf8")).toBe(originalLesson);
+    expect(await readProgress(videoFolder)).toEqual({
+      version: 1,
+      lessons: {
+        "core-topic": {
+          ...progress.lessons["core-topic"],
+          status: "pending",
+          lessonFile: "lessons/01-core-topic.md"
+        }
+      }
+    });
+  });
+
+  it("teach --refresh ignores invalid stored lesson paths and reads the canonical lesson", async () => {
+    const invalidStoredPaths: unknown[] = [
+      "../escape.md",
+      "/tmp/escape.md",
+      "lessons/../escape.md",
+      "lessons\\escape.md",
+      "notes/core-topic.md",
+      "lessons/core-topic.txt",
+      42
+    ];
+
+    for (const storedLessonFile of invalidStoredPaths) {
+      const videoFolder = await makeVideoFolder();
+      const lessonPath = path.join(videoFolder, "learning", "lessons", "01-core-topic.md");
+      const originalLesson = `# Core Topic\n\n## Learning goal\nCanonical lesson for ${String(storedLessonFile)}.`;
+      await mkdir(path.dirname(lessonPath), { recursive: true });
+      await writeFile(lessonPath, originalLesson, "utf8");
+      await writeFile(
+        path.join(videoFolder, "learning", "progress.json"),
+        JSON.stringify({
+          version: 1,
+          lessons: {
+            "core-topic": { status: "done", lessonFile: storedLessonFile }
+          }
+        }),
+        "utf8"
+      );
+
+      await teach(videoFolder, "core-topic", { refresh: true });
+
+      const prompt = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"), "utf8");
+      expect(prompt).toContain("The current lesson was read from `learning/lessons/01-core-topic.md`.");
+      expect(prompt).toContain(originalLesson);
+    }
+  });
+
+  it("teach --refresh dry-run writes nothing and preserves progress", async () => {
+    const videoFolder = await makeVideoFolder();
+    const lessonPath = path.join(videoFolder, "learning", "lessons", "01-core-topic.md");
+    const progress = {
+      version: 1,
+      lessons: {
+        "core-topic": { status: "done", lessonFile: "lessons/01-core-topic.md" }
+      }
+    };
+    await mkdir(path.dirname(lessonPath), { recursive: true });
+    await writeFile(lessonPath, "# Core Topic\n\n## Learning goal\nOld lesson.", "utf8");
+    await writeFile(path.join(videoFolder, "learning", "progress.json"), JSON.stringify(progress), "utf8");
+
+    await teach(videoFolder, "core-topic", { refresh: true, dryRun: true });
+
+    expect(await pathExists(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"))).toBe(false);
+    expect(await readProgress(videoFolder)).toEqual(progress);
+  });
+
+  it("teach --refresh requires an existing lesson and explicit topic id", async () => {
+    const videoFolder = await makeVideoFolder();
+
+    await expect(teach(videoFolder, "core-topic", { refresh: true })).rejects.toThrow("Existing lesson not found");
+    await expect(teach(videoFolder, undefined, { refresh: true })).rejects.toThrow("explicit topic id");
+    await expect(teach(videoFolder, "core-topic", { refresh: true, next: true })).rejects.toThrow("not both");
+  });
+
   it("learn --done dry-run validates but does not update progress", async () => {
     const videoFolder = await makeVideoFolder();
     const progress = {
