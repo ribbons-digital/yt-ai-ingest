@@ -81,7 +81,7 @@ ytai --verbose ingest "YOUTUBE_URL"
 
 Use `--dry-run` to preview supported external commands and non-mutating write plans.
 For `ingest` and `prepare`, dry runs skip the interactive folder prompt and use the generated default folder.
-For local ingest and learning commands, dry runs validate inputs and report the directory, prompt, or progress update that would happen without changing output files.
+For local ingest and learning commands, dry runs validate inputs and report the directory, prompt, HTML file, or progress update that would happen without changing output files.
 
 Default output is concise and hides raw `yt-dlp` / `ffmpeg` logs behind friendly status lines.
 Use `--verbose` when you need to debug the underlying commands or see full tool output.
@@ -238,6 +238,7 @@ learning/                       # (after the learning commands, see Learning Wor
   plan-input.md                 # written by ytai plan
   plan.md                       # written by your LLM
   resources.md                  # written by your LLM
+  concepts.json                 # written by your LLM
   progress.json                 # lesson progress and quiz scores, managed by ytai
   lessons/                      # <nn>-<topic-id>-input.md from ytai teach, <nn>-<topic-id>.md from your LLM, optional <nn>-<topic-id>.html from ytai render-lesson
   quizzes/                      # <nn>-<topic-id>-quiz-input.md from ytai quiz; only the score persists, via ytai score
@@ -395,6 +396,7 @@ learning/
   lessons/
     01-topic-id-input.md        # written by ytai teach
     01-topic-id.md              # written by your LLM
+    01-topic-id.html            # optional local page written by ytai render-lesson
   quizzes/
     01-topic-id-quiz-input.md   # written by ytai quiz; the quiz runs in conversation, no output file
 ```
@@ -511,7 +513,7 @@ Lesson quality validation surfaces missing teaching sections, missing practice a
 `ytai learn <folder> --json` prints only `{ stage, artifacts, lessons, issues, review, nextAction }`; `nextAction.kind` is `cli` (run a command) or `llm` (write a file).
 `ytai learn <folder> --check` validates the learning artifacts and exits with code 1 on errors.
 `ytai learn <folder> --done <topic-id>` marks a topic's lesson done.
-With `--dry-run`, `topics`, `plan`, `teach`, `render-lesson`, `quiz`, `score`, and `learn --done` validate and print the file or progress update they would make without writing prompt files, HTML files, or changing `learning/progress.json`.
+With `--dry-run`, `topics`, `plan`, `teach`, `render-lesson`, `quiz`, `score`, and `learn --done` validate and print the prompt file, HTML file, or progress update they would make without writing prompt files, HTML files, or changing `learning/progress.json`.
 Regenerating or refreshing a lesson prompt for a completed topic resets that topic to pending while preserving its quiz scores and next review time.
 
 ### Retention: quiz and review
