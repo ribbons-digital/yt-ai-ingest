@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { learnStatus, plan, recordScore, teach, topics } from "../src/commands/learn.js";
 import { quiz } from "../src/commands/quiz.js";
 import { pathExists } from "../src/lib/files.js";
@@ -48,12 +48,59 @@ describe("learning command dry-run behavior", () => {
     expect(await pathExists(path.join(videoFolder, "learning"))).toBe(false);
   });
 
-  it("plan dry-run validates topics but does not write plan-input.md", async () => {
+  it("topics creates a default learner profile when missing", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-learn-profile-"));
+
+    await topics(videoFolder);
+
+    const profile = JSON.parse(await readFile(path.join(videoFolder, "learning", "learner-profile.json"), "utf8"));
+    expect(profile).toMatchObject({
+      version: 1,
+      audienceLevel: expect.any(String),
+      knownConcepts: [],
+      preferredDepth: "learn"
+    });
+    expect(profile.goals.join(" ")).toContain("Skip watching the full video");
+    expect(profile.goals.join(" ")).toContain("systematically");
+    expect(profile.doNotAssumeTerms).toContain("SFT");
+    expect(profile.teachingPreferences).toContain("Explain prerequisites before using them.");
+  });
+
+  it("topics does not overwrite an existing learner profile", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-learn-profile-"));
+    const profilePath = path.join(videoFolder, "learning", "learner-profile.json");
+    const customProfile = {
+      version: 1,
+      audienceLevel: "expert practitioner",
+      goals: ["Keep this custom goal."],
+      knownConcepts: ["attention"],
+      doNotAssumeTerms: ["domain-specific acronym"],
+      preferredDepth: "master",
+      teachingPreferences: ["Use dense explanations."]
+    };
+    await mkdir(path.dirname(profilePath), { recursive: true });
+    await writeFile(profilePath, JSON.stringify(customProfile, null, 2), "utf8");
+
+    await topics(videoFolder);
+
+    expect(JSON.parse(await readFile(profilePath, "utf8"))).toEqual(customProfile);
+  });
+
+  it("plan dry-run previews plan input and missing learner profile without writing files", async () => {
     const videoFolder = await makeVideoFolder();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let logs = "";
+    try {
+      await plan(videoFolder, { dryRun: true });
+      logs = logSpy.mock.calls.flat().join("\n");
+    } finally {
+      logSpy.mockRestore();
+    }
 
-    await plan(videoFolder, { dryRun: true });
-
+    expect(logs).toContain(path.join(videoFolder, "learning", "plan-input.md"));
+    expect(logs).toContain(path.join(videoFolder, "learning", "learner-profile.json"));
     expect(await pathExists(path.join(videoFolder, "learning", "plan-input.md"))).toBe(false);
+    expect(await pathExists(path.join(videoFolder, "learning", "learner-profile.json"))).toBe(false);
   });
 
   it("teach preserves existing lesson review data when regenerating a prompt", async () => {
@@ -86,6 +133,20 @@ describe("learning command dry-run behavior", () => {
     });
   });
 
+  it("teach creates and embeds a missing learner profile", async () => {
+    const videoFolder = await makeVideoFolder();
+
+    await teach(videoFolder, "core-topic");
+
+    const profile = JSON.parse(await readFile(path.join(videoFolder, "learning", "learner-profile.json"), "utf8"));
+    const prompt = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"), "utf8");
+    expect(profile.goals.join(" ")).toContain("Skip watching the full video");
+    expect(profile.goals.join(" ")).toContain("systematically");
+    expect(prompt).toContain("## Learner profile");
+    expect(prompt).toContain('"audienceLevel": "curious learner who may be new to the video\'s subject"');
+    expect(prompt).toContain("Skip watching the full video while still learning its important ideas systematically.");
+  });
+
   it("teach dry-run does not write a lesson prompt or progress", async () => {
     const videoFolder = await makeVideoFolder();
     const progress = {
@@ -101,8 +162,18 @@ describe("learning command dry-run behavior", () => {
     };
     await writeFile(path.join(videoFolder, "learning", "progress.json"), JSON.stringify(progress), "utf8");
 
-    await teach(videoFolder, "core-topic", { dryRun: true });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let logs = "";
+    try {
+      await teach(videoFolder, "core-topic", { dryRun: true });
+      logs = logSpy.mock.calls.flat().join("\n");
+    } finally {
+      logSpy.mockRestore();
+    }
 
+    expect(logs).toContain(path.join(videoFolder, "learning", "learner-profile.json"));
+    expect(logs).toContain(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"));
+    expect(await pathExists(path.join(videoFolder, "learning", "learner-profile.json"))).toBe(false);
     expect(await pathExists(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"))).toBe(false);
     expect(await readProgress(videoFolder)).toEqual(progress);
   });
@@ -153,5 +224,23 @@ describe("learning command dry-run behavior", () => {
     await quiz(videoFolder, "core-topic", { dryRun: true });
 
     expect(await pathExists(path.join(videoFolder, "learning", "quizzes", "01-core-topic-quiz-input.md"))).toBe(false);
+  });
+
+  it("learn --check warns when a core topic lacks a resource section", async () => {
+    const videoFolder = await makeVideoFolder();
+    await writeFile(
+      path.join(videoFolder, "learning", "resources.md"),
+      ["# Learning resources", "", "## Unrelated topic", "", "- URL: https://example.com/other"].join("\n"),
+      "utf8"
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let warnings = "";
+    try {
+      await learnStatus(videoFolder, { check: true });
+      warnings = warnSpy.mock.calls.flat().join("\n");
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(warnings).toContain('core topic "core-topic" has no resource section in learning/resources.md.');
   });
 });

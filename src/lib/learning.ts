@@ -61,6 +61,15 @@ export type LearningProgress = {
   version: 1;
   lessons: Record<string, LessonProgressEntry>;
 };
+export type LearnerProfile = {
+  version: 1;
+  audienceLevel: string;
+  goals: string[];
+  knownConcepts: string[];
+  doNotAssumeTerms: string[];
+  preferredDepth: "skim" | "learn" | "master";
+  teachingPreferences: string[];
+};
 
 export type ValidationIssue = {
   severity: "error" | "warning";
@@ -92,6 +101,7 @@ export type LearnArtifacts = {
   topics: Topic[];
   lessonIssues: ValidationIssue[];
   conceptsIssues: ValidationIssue[];
+  resourcesIssues: ValidationIssue[];
   hasPlanInput: boolean;
   hasPlanMd: boolean;
   hasResourcesMd: boolean;
@@ -120,6 +130,7 @@ export type LearnStatusJson = {
 };
 
 export type LessonPromptContext = {
+  learnerProfileJson?: string;
   teachingGuideMd?: string;
   conceptsJson?: string;
   resourcesMd?: string;
@@ -132,6 +143,26 @@ const IMPORTANCE_RANK: Record<TopicImportance, number> = {
   supporting: 1,
   tangent: 2
 };
+export function createDefaultLearnerProfile(): LearnerProfile {
+  return {
+    version: 1,
+    audienceLevel: "curious learner who may be new to the video's subject",
+    goals: [
+      "Skip watching the full video while still learning its important ideas systematically.",
+      "Build durable conceptual understanding from the video's claims, transcript evidence, and supporting explanations.",
+      "Know which prerequisites, acronyms, and terms need attention before moving on."
+    ],
+    knownConcepts: [],
+    doNotAssumeTerms: ["SFT", "TRL", "LoRA", "RL", "eval loss", "masking"],
+    preferredDepth: "learn",
+    teachingPreferences: [
+      "Explain prerequisites before using them.",
+      "Separate what the video says from background explanation.",
+      "Use concrete examples, common confusions, and practice questions with answers.",
+      "Suggest what to study next without requiring the learner to watch the full video."
+    ]
+  };
+}
 
 export function validateTopicsFile(
   value: unknown,
@@ -737,10 +768,27 @@ export function renderPlanInputMd(topicsJson: string, videoFolder: string): stri
     "",
     "## resources.md requirements",
     "",
-    "- For each `core` topic list 2 to 4 external resources.",
-    "- Each resource needs a URL, one line on why it helps, and one line saying what the learner should focus on.",
+    "- For each `core` topic, include one `##` section whose heading names both the topic title and topic id.",
+    "- Under each core-topic section, list 2 to 4 external resources.",
+    "- Each resource must include these labeled lines: `URL`, `Why it helps`, `Focus on`, `Skip for now`, and `Use after`.",
+    "- Use `Focus on` for the exact part the learner should study, `Skip for now` for distracting or too-advanced parts, and `Use after` for when this resource belongs in the learning path.",
     "- Use your own search tools or knowledge to find resources.",
     "- Mark any link you could not verify as `(unverified)`.",
+    "",
+    "Expected resources.md shape:",
+    "",
+    "```markdown",
+    "# Learning resources",
+    "",
+    "## Gradient descent basics (`gradient-descent-basics`)",
+    "",
+    "### Resource title",
+    "- URL: https://example.com/resource",
+    "- Why it helps: One sentence on why this resource is worth the learner's time.",
+    "- Focus on: The specific section, chapter, timestamp, or concept to study.",
+    "- Skip for now: The part that is distracting, too advanced, or not needed yet.",
+    "- Use after: The lesson, prerequisite, or confidence level that should come before this resource.",
+    "```",
     "",
     "## concepts.json requirements",
     "",
@@ -801,6 +849,7 @@ export function renderLessonInputMd(
     topic.visualEvidence && topic.visualEvidence.length > 0
       ? topic.visualEvidence.map((evidencePath) => `- \`${evidencePath}\``).join("\n")
       : "_No visual evidence paths recorded for this topic._";
+  const learnerProfileSection = renderLearnerProfileContext(context.learnerProfileJson);
   const teachingGuideSection = renderTeachingGuideContext(context.teachingGuideMd);
   const conceptCardsSection = renderConceptCardsContext(context.conceptsJson, topic.id);
   const resourcesSection = renderResourcesContext(context.resourcesMd, topic);
@@ -854,6 +903,10 @@ export function renderLessonInputMd(
     "",
     visualEvidence,
     "",
+    "## Learner profile",
+    "",
+    learnerProfileSection,
+    "",
     "## Teaching guide",
     "",
     teachingGuideSection,
@@ -875,6 +928,13 @@ export function renderLessonInputMd(
     `After writing \`${outputFile}\`, run: \`ytai learn ${videoFolder}\` to validate it and get the next step.`,
     ""
   ].join("\n");
+}
+
+function renderLearnerProfileContext(learnerProfileJson: string | undefined): string {
+  const trimmed = learnerProfileJson?.trim();
+  return trimmed
+    ? ["```json", trimmed, "```"].join("\n")
+    : "_learning/learner-profile.json is absent. Adapt from the role, task, teaching guide, and quality bar in this prompt, and avoid assuming advanced prior knowledge._";
 }
 
 function renderTeachingGuideContext(teachingGuideMd: string | undefined): string {
@@ -928,17 +988,55 @@ function renderResourcesContext(resourcesMd: string | undefined, topic: Topic): 
     : `_No matching section for \`${topic.id}\` was found in learning/resources.md. Proceed cautiously by keeping suggested learning specific and clearly marking anything inferred._`;
 }
 
-function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
-  const lines = markdown.split(/\r?\n/);
-  const topicMatchesHeading = buildTopicHeadingMatcher(topic);
+const REQUIRED_RESOURCE_LABELS = ["URL", "Why it helps", "Focus on", "Skip for now", "Use after"] as const;
 
+export function validateResourceSections(resourcesMd: string | undefined, topics: Topic[]): ValidationIssue[] {
+  const trimmed = resourcesMd?.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const issues: ValidationIssue[] = [];
+  for (const topic of topics) {
+    if (topic.importance !== "core") {
+      continue;
+    }
+
+    const section = findTopicResourceSection(trimmed, topic);
+    if (!section) {
+      issues.push(issueWarning(`core topic "${topic.id}" has no resource section in learning/resources.md.`));
+      continue;
+    }
+
+    const missingLabels = REQUIRED_RESOURCE_LABELS.filter((label) => !hasResourceLabel(section, label));
+    if (missingLabels.length > 0) {
+      issues.push(
+        issueWarning(
+          `core topic "${topic.id}" resource section in learning/resources.md is missing required guidance: ${missingLabels.join(", ")}.`
+        )
+      );
+    }
+  }
+
+  return issues;
+}
+
+export function findTopicResourceSection(markdown: string, topic: Topic): string | undefined {
+  const lines = markdown.split(/\r?\n/);
+  const idMatcher = buildTopicHeadingMatcher(topic, "id");
+  const titleMatcher = buildTopicHeadingMatcher(topic, "title");
+
+  return findResourceSectionByHeading(lines, idMatcher) ?? findResourceSectionByHeading(lines, titleMatcher);
+}
+
+function findResourceSectionByHeading(lines: string[], matchesHeading: (heading: string) => boolean): string | undefined {
   for (let index = 0; index < lines.length; index += 1) {
     const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[index]);
     if (!heading) {
       continue;
     }
 
-    if (!topicMatchesHeading(heading[2])) {
+    if (!matchesHeading(heading[2])) {
       continue;
     }
     const level = heading[1].length;
@@ -957,16 +1055,37 @@ function findTopicResourceSection(markdown: string, topic: Topic): string | unde
   return undefined;
 }
 
-function buildTopicHeadingMatcher(topic: Topic): (heading: string) => boolean {
-  const targetPhrases = [topic.id, topic.title]
-    .map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())
-    .filter((value) => value.length > 0);
+function buildTopicHeadingMatcher(topic: Topic, mode: "id" | "title"): (heading: string) => boolean {
+  const topicId = normalizeHeadingText(topic.id);
+  const topicTitle = normalizeHeadingText(topic.title);
 
   return (heading: string) => {
-    const normalizedHeading = heading.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const paddedHeading = ` ${normalizedHeading} `;
-    return targetPhrases.some((phrase) => paddedHeading.includes(` ${phrase} `));
+    if (mode === "id") {
+      return topicId.length > 0 && headingHasExactBacktickedTopicId(heading, topicId);
+    }
+
+    const headingWithoutBackticks = heading.replace(/`[^`]+`/g, " ");
+    return topicTitle.length > 0 && normalizeHeadingText(headingWithoutBackticks) === topicTitle;
   };
+}
+
+function headingHasExactBacktickedTopicId(heading: string, normalizedTopicId: string): boolean {
+  for (const match of heading.matchAll(/`([^`]+)`/g)) {
+    if (normalizeHeadingText(match[1] ?? "") === normalizedTopicId) {
+      return true;
+    }
+  }
+
+  return normalizeHeadingText(heading) === normalizedTopicId;
+}
+
+function hasResourceLabel(section: string, label: string): boolean {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*(?:[-*]\\s*)?${escapedLabel}\\s*:`, "im").test(section);
+}
+
+function normalizeHeadingText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 export function renderQuizInputMd(
@@ -1066,7 +1185,7 @@ export function renderLearnStatus(
     lines.push("", `Quiz next: ytai quiz ${artifacts.videoFolder} --due`);
   }
 
-  const issues = [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues];
+  const issues = [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.resourcesIssues, ...artifacts.lessonIssues];
   if (issues.length > 0) {
     lines.push("", "Issues:");
     for (const issue of issues) {
@@ -1097,7 +1216,7 @@ export function toStatusJson(
       conceptsJson: artifacts.hasConceptsJson
     },
     lessons: lessonCounts(artifacts),
-    issues: [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.lessonIssues],
+    issues: [...artifacts.topicsIssues, ...artifacts.conceptsIssues, ...artifacts.resourcesIssues, ...artifacts.lessonIssues],
     review,
     nextAction: next
   };

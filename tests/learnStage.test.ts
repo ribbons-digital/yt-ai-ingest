@@ -20,6 +20,7 @@ function artifacts(overrides: Partial<LearnArtifacts> = {}): LearnArtifacts {
     topics: [],
     lessonIssues: [],
     conceptsIssues: [],
+    resourcesIssues: [],
     hasPlanInput: false,
     hasPlanMd: false,
     hasResourcesMd: false,

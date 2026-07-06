@@ -382,6 +382,7 @@ Everything lives under `learning/` in the video folder:
 ```text
 learning/
   teaching-guide.md             # deterministic teaching contract, preserved when topics reruns
+  learner-profile.json           # editable learner preferences, preserved on reruns
   topics-input.md               # written by ytai topics
   topics.json                   # written by your LLM
   plan-input.md                 # written by ytai plan
@@ -395,6 +396,9 @@ learning/
   quizzes/
     01-topic-id-quiz-input.md   # written by ytai quiz; the quiz runs in conversation, no output file
 ```
+
+`learner-profile.json` is local JSON that `ytai` writes when missing and preserves on reruns.
+You may edit it manually to tune the learner's level, goals, known concepts, terms the lesson should not assume, preferred depth, and teaching preferences.
 
 `learning/topics.json` uses schema version 1:
 
@@ -420,6 +424,26 @@ learning/
 Validation errors include non-kebab-case or duplicate ids, invalid timestamp ranges, and prerequisites that reference unknown ids.
 Ranges ending past the video duration, `visualEvidence` paths missing from the folder, and prerequisite cycles are warnings.
 Lessons are taught in topological prerequisite order, with ties broken by importance rank and then input order; cycles never block ordering.
+
+
+`learning/resources.md` should group external learning paths by core topic:
+
+```markdown
+# Learning resources
+
+## Gradient descent basics (`gradient-descent-basics`)
+
+### Resource title
+- URL: https://example.com/resource
+- Why it helps: One sentence on why this resource is worth the learner's time.
+- Focus on: The specific section, chapter, timestamp, or concept to study.
+- Skip for now: The part that is distracting, too advanced, or not needed yet.
+- Use after: The lesson, prerequisite, or confidence level that should come before this resource.
+```
+
+Each `core` topic should have a `##` section whose heading includes the topic id.
+`ytai teach` embeds only the current topic's resource section in the lesson prompt.
+`ytai learn --check` warns when a core topic has no matching resource section or when the section lacks the expected guidance labels.
 
 `learning/concepts.json` uses schema version 1:
 
