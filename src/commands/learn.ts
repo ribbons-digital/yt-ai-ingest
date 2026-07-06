@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { listFilesRecursive, pathExists, writeJson } from "../lib/files.js";
 import {
+  createDefaultLearnerProfile,
   computeLearnStage,
   computeNextReview,
   nextAction,
@@ -49,10 +50,13 @@ export async function topics(videoFolder: string, options: LearnOptions = {}): P
   const learningDir = path.join(videoFolder, "learning");
   const outPath = path.join(learningDir, "topics-input.md");
   const guidePath = path.join(learningDir, "teaching-guide.md");
+  const profilePath = path.join(learningDir, "learner-profile.json");
   if (options.dryRun) {
     info("Dry run", `Would write ${outPath}`);
-    if (!(await pathExists(guidePath))) {
-      info("Dry run", `Would write ${guidePath}`);
+    for (const wouldWritePath of [guidePath, profilePath]) {
+      if (!(await pathExists(wouldWritePath))) {
+        info("Dry run", `Would write ${wouldWritePath}`);
+      }
     }
     info(
       "Next",
@@ -69,6 +73,7 @@ export async function topics(videoFolder: string, options: LearnOptions = {}): P
     await writeFile(guidePath, renderTeachingGuideMd(), "utf8");
     success("Teaching guide written", guidePath);
   }
+  await ensureLearnerProfile(videoFolder);
   info(
     "Next",
     `Have an LLM read learning/topics-input.md and write learning/topics.json, then run: ytai learn ${videoFolder}`
@@ -82,6 +87,7 @@ export async function plan(videoFolder: string, options: LearnOptions = {}): Pro
     info("Dry run", `Would write ${outPath}`);
   } else {
     await mkdir(path.dirname(outPath), { recursive: true });
+    await ensureLearnerProfile(videoFolder);
     await writeFile(outPath, renderPlanInputMd(raw, videoFolder), "utf8");
     success("Plan prompt written", outPath);
   }
@@ -122,6 +128,9 @@ export async function teach(
   const paddedNumber = String(lessonNumber).padStart(2, "0");
   const lessonFile = `lessons/${paddedNumber}-${topic.id}.md`;
   const excerpt = await buildTranscriptExcerpt(videoFolder, topic);
+  if (!options.dryRun) {
+    await ensureLearnerProfile(videoFolder);
+  }
   const lessonContext = await readLessonPromptContext(videoFolder);
 
   const inputPath = path.join(videoFolder, "learning", "lessons", `${paddedNumber}-${topic.id}-input.md`);
@@ -517,13 +526,25 @@ export async function buildTranscriptExcerpt(videoFolder: string, topic: Topic):
 
 async function readLessonPromptContext(videoFolder: string) {
   const learningDir = path.join(videoFolder, "learning");
-  const [teachingGuideMd, conceptsJson, resourcesMd] = await Promise.all([
+  const [learnerProfileJson, teachingGuideMd, conceptsJson, resourcesMd] = await Promise.all([
+    readOptional(path.join(learningDir, "learner-profile.json")),
     readOptional(path.join(learningDir, "teaching-guide.md")),
     readOptional(path.join(learningDir, "concepts.json")),
     readOptional(path.join(learningDir, "resources.md"))
   ]);
 
-  return { teachingGuideMd, conceptsJson, resourcesMd };
+  return { learnerProfileJson, teachingGuideMd, conceptsJson, resourcesMd };
+}
+
+async function ensureLearnerProfile(videoFolder: string): Promise<void> {
+  const learningDir = path.join(videoFolder, "learning");
+  const profilePath = path.join(learningDir, "learner-profile.json");
+  if (await pathExists(profilePath)) {
+    return;
+  }
+
+  await mkdir(learningDir, { recursive: true });
+  await writeJson(profilePath, createDefaultLearnerProfile());
 }
 
 async function readOptional(filePath: string): Promise<string | undefined> {

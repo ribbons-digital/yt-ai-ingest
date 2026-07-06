@@ -48,6 +48,44 @@ describe("learning command dry-run behavior", () => {
     expect(await pathExists(path.join(videoFolder, "learning"))).toBe(false);
   });
 
+  it("topics creates a default learner profile when missing", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-learn-profile-"));
+
+    await topics(videoFolder);
+
+    const profile = JSON.parse(await readFile(path.join(videoFolder, "learning", "learner-profile.json"), "utf8"));
+    expect(profile).toMatchObject({
+      version: 1,
+      audienceLevel: expect.any(String),
+      knownConcepts: [],
+      preferredDepth: "learn"
+    });
+    expect(profile.goals.join(" ")).toContain("Skip watching the full video");
+    expect(profile.goals.join(" ")).toContain("systematically");
+    expect(profile.doNotAssumeTerms).toContain("SFT");
+    expect(profile.teachingPreferences).toContain("Explain prerequisites before using them.");
+  });
+
+  it("topics does not overwrite an existing learner profile", async () => {
+    const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-learn-profile-"));
+    const profilePath = path.join(videoFolder, "learning", "learner-profile.json");
+    const customProfile = {
+      version: 1,
+      audienceLevel: "expert practitioner",
+      goals: ["Keep this custom goal."],
+      knownConcepts: ["attention"],
+      doNotAssumeTerms: ["domain-specific acronym"],
+      preferredDepth: "master",
+      teachingPreferences: ["Use dense explanations."]
+    };
+    await mkdir(path.dirname(profilePath), { recursive: true });
+    await writeFile(profilePath, JSON.stringify(customProfile, null, 2), "utf8");
+
+    await topics(videoFolder);
+
+    expect(JSON.parse(await readFile(profilePath, "utf8"))).toEqual(customProfile);
+  });
+
   it("plan dry-run validates topics but does not write plan-input.md", async () => {
     const videoFolder = await makeVideoFolder();
 
@@ -84,6 +122,20 @@ describe("learning command dry-run behavior", () => {
         }
       }
     });
+  });
+
+  it("teach creates and embeds a missing learner profile", async () => {
+    const videoFolder = await makeVideoFolder();
+
+    await teach(videoFolder, "core-topic");
+
+    const profile = JSON.parse(await readFile(path.join(videoFolder, "learning", "learner-profile.json"), "utf8"));
+    const prompt = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic-input.md"), "utf8");
+    expect(profile.goals.join(" ")).toContain("Skip watching the full video");
+    expect(profile.goals.join(" ")).toContain("systematically");
+    expect(prompt).toContain("## Learner profile");
+    expect(prompt).toContain('"audienceLevel": "curious learner who may be new to the video\'s subject"');
+    expect(prompt).toContain("Skip watching the full video while still learning its important ideas systematically.");
   });
 
   it("teach dry-run does not write a lesson prompt or progress", async () => {

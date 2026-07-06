@@ -382,6 +382,7 @@ Everything lives under `learning/` in the video folder:
 ```text
 learning/
   teaching-guide.md             # deterministic teaching contract, preserved when topics reruns
+  learner-profile.json           # editable learner preferences, preserved on reruns
   topics-input.md               # written by ytai topics
   topics.json                   # written by your LLM
   plan-input.md                 # written by ytai plan
@@ -395,6 +396,9 @@ learning/
   quizzes/
     01-topic-id-quiz-input.md   # written by ytai quiz; the quiz runs in conversation, no output file
 ```
+
+`learner-profile.json` is local JSON that `ytai` writes when missing and preserves on reruns.
+You may edit it manually to tune the learner's level, goals, known concepts, terms the lesson should not assume, preferred depth, and teaching preferences.
 
 `learning/topics.json` uses schema version 1:
 
