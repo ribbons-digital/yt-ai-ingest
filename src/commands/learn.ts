@@ -502,11 +502,24 @@ function safeVideoFolderRelativePath(rawPath: string): string | undefined {
     path.win32.isAbsolute(normalized) ||
     normalized.includes("\\") ||
     /^[a-zA-Z][a-zA-Z\d+.-]*:/u.test(normalized) ||
-    normalized.split("/").some((segment) => segment === ".." || segment.length === 0)
+    normalized.split("/").some(isUnsafeVideoFolderSegment)
   ) {
     return undefined;
   }
   return normalized;
+}
+
+function isUnsafeVideoFolderSegment(segment: string): boolean {
+  if (segment.length === 0) {
+    return true;
+  }
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return true;
+  }
+  return decoded === "." || decoded === "..";
 }
 
 type ResourcesReadResult = {

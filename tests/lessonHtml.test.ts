@@ -89,6 +89,18 @@ describe("renderLesson command", () => {
     expect(html).not.toContain("missing.jpg");
   });
 
+  it("rejects encoded dot-segment visual evidence paths", async () => {
+    const videoFolder = await makeVideoFolder({ visualEvidence: ["frames/%2e%2e/secret.jpg"] });
+    await mkdir(path.join(videoFolder, "frames", "%2e%2e"), { recursive: true });
+    await writeFile(path.join(videoFolder, "frames", "%2e%2e", "secret.jpg"), "fake", "utf8");
+
+    await renderLesson(videoFolder, "core-topic");
+
+    const html = await readFile(path.join(videoFolder, "learning", "lessons", "01-core-topic.html"), "utf8");
+    expect(html).not.toContain("%2e%2e");
+    expect(html).not.toContain("secret.jpg");
+  });
+
   it("honors dry-run without writing HTML", async () => {
     const videoFolder = await makeVideoFolder();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -145,7 +157,7 @@ describe("renderLesson command", () => {
   });
 });
 
-async function makeVideoFolder(options: { lesson?: boolean } = {}): Promise<string> {
+async function makeVideoFolder(options: { lesson?: boolean; visualEvidence?: string[] } = {}): Promise<string> {
   const videoFolder = await mkdtemp(path.join(os.tmpdir(), "ytai-lesson-html-"));
   await mkdir(path.join(videoFolder, "learning", "lessons"), { recursive: true });
   await mkdir(path.join(videoFolder, "frames", "scout"), { recursive: true });
@@ -155,7 +167,9 @@ async function makeVideoFolder(options: { lesson?: boolean } = {}): Promise<stri
     path.join(videoFolder, "learning", "topics.json"),
     JSON.stringify({
       version: 1,
-      topics: [{ ...topic, visualEvidence: ["frames/scout/frame_0001.jpg", "frames/scout/missing.jpg"] }]
+      topics: [
+        { ...topic, visualEvidence: options.visualEvidence ?? ["frames/scout/frame_0001.jpg", "frames/scout/missing.jpg"] }
+      ]
     }),
     "utf8"
   );
